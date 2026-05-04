@@ -50,6 +50,8 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
+    let isSuccess = false;
+
     try {
       const { data, error } = await supabase.functions.invoke('verify-otp', {
         body: { phone, otp, otpHash },
@@ -82,6 +84,7 @@ export default function LoginPage() {
           throw new Error("Access denied. Admin privileges required.");
         }
 
+        isSuccess = true;
         router.push("/");
         router.refresh();
       } else {
@@ -90,7 +93,9 @@ export default function LoginPage() {
     } catch (err) {
       setError(err.message || "Failed to verify OTP.");
     } finally {
-      setLoading(false);
+      if (!isSuccess) {
+        setLoading(false);
+      }
     }
   };
 

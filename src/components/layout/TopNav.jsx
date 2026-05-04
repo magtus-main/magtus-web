@@ -1,12 +1,35 @@
 "use client";
 
+import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
-import { ExternalLink, HelpCircle, Bell } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { ExternalLink, HelpCircle, Bell, LogOut } from "lucide-react";
+import { createClient } from "@/utils/supabase/client";
 
 export default function TopNav({ profile }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  };
 
   const navItems = [
     { label: "Dashboard", href: "/" },
@@ -65,7 +88,11 @@ export default function TopNav({ profile }) {
           <Bell size={20} strokeWidth={1.5} />
         </button>
 
-        <div className="flex items-center gap-3 ml-2 cursor-pointer group">
+        <div
+          className="relative flex items-center gap-3 ml-2 cursor-pointer group"
+          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          ref={dropdownRef}
+        >
           <div className="flex flex-col items-end">
             <span className="text-xs font-medium text-gray-900 group-hover:text-primary transition-colors">
               {profile?.full_name || 'Admin'}
@@ -87,6 +114,21 @@ export default function TopNav({ profile }) {
               </span>
             )}
           </div>
+
+          {/* Dropdown Menu */}
+          {isDropdownOpen && (
+            <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="p-1">
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleLogout(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                >
+                  <LogOut size={16} />
+                  <span>Log out</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>
