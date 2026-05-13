@@ -14,7 +14,7 @@ export default async function ProductsPage() {
     .select(`
       *,
       categories (id, name),
-      product_images (url, is_primary)
+      product_images (id, url, is_primary)
     `)
     .order('created_at', { ascending: false });
 

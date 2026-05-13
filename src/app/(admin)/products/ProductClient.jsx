@@ -3,6 +3,7 @@
 import PageHeader from "@/components/layout/PageHeader";
 import { useLoader } from "@/components/providers/LoaderProvider";
 import { ImageUpload } from "@/components/shared/ImageUpload";
+import { optimizeImage, prepareImageForPreview } from "@/utils/imageOptimizer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,7 +170,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
 
   const handleAddProductImage = (file) => {
     if (file) {
-      setProductImages([...productImages, { file, url: URL.createObjectURL(file), isExisting: false, is_primary: productImages.length === 0 }]);
+      const imgObj = prepareImageForPreview(file, productImages.length === 0);
+      setProductImages(prev => [...prev, imgObj]);
     }
   };
 
@@ -238,9 +240,9 @@ export default function ProductClient({ initialProducts, initialCategories, init
       }
 
       // Handle Images
-      const currentExistingImageIds = productImages.filter(img => img.isExisting).map(img => img.id);
-      const originalExistingImageIds = editingProductId ? products.find(p => p.id === editingProductId)?.product_images?.map(img => img.id) || [] : [];
-      const imagesToDelete = originalExistingImageIds.filter(id => !currentExistingImageIds.includes(id));
+      const currentExistingImageIds = productImages.filter(img => img.isExisting && img.id).map(img => img.id);
+      const originalExistingImageIds = editingProductId ? products.find(p => p.id === editingProductId)?.product_images?.map(img => img.id).filter(Boolean) || [] : [];
+      const imagesToDelete = originalExistingImageIds.filter(id => !currentExistingImageIds.includes(id) && id);
 
       if (imagesToDelete.length > 0) {
         await supabase.from('product_images').delete().in('id', imagesToDelete);
@@ -250,10 +252,22 @@ export default function ProductClient({ initialProducts, initialCategories, init
       for (let i = 0; i < productImages.length; i++) {
         const img = productImages[i];
         if (!img.isExisting && img.file) {
-          const fileExt = img.file.name.split('.').pop();
+          // Optimize image before upload (WhatsApp-style compression, <2MB)
+          let optimizedFile;
+          try {
+            optimizedFile = await optimizeImage(img.file);
+          } catch (optErr) {
+            console.warn('Image optimization failed, using original:', optErr);
+            optimizedFile = img.file;
+          }
+
+          const fileExt = optimizedFile.name.split('.').pop();
           const cleanName = productForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
           const fileName = `${productId}/${cleanName}_${i}.${fileExt}`;
-          const { error: uploadError } = await supabase.storage.from('products').upload(fileName, img.file, { upsert: true });
+          const { error: uploadError } = await supabase.storage.from('products').upload(fileName, optimizedFile, {
+            upsert: true,
+            contentType: optimizedFile.type,
+          });
           if (uploadError) {
             console.error('Image upload failed:', uploadError);
             toast.error(`Image upload failed: ${uploadError.message}`);
@@ -270,18 +284,21 @@ export default function ProductClient({ initialProducts, initialCategories, init
         }
       }
 
-      // Update finishImages with final URLs if there are mapped blob URLs
-      if (Object.keys(urlMapping).length > 0) {
-        const finalFinishImages = { ...payload.specifications.finishImages };
-        for (const [finish, url] of Object.entries(finalFinishImages)) {
-          if (urlMapping[url]) {
-            finalFinishImages[finish] = urlMapping[url];
-          }
+      // Update finishImages: replace blob URLs with uploaded URLs, strip any remaining blobs
+      const finalFinishImages = { ...payload.specifications.finishImages };
+      for (const [finish, url] of Object.entries(finalFinishImages)) {
+        if (urlMapping[url]) {
+          // Replace blob URL with the uploaded public URL
+          finalFinishImages[finish] = urlMapping[url];
+        } else if (typeof url === 'string' && url.startsWith('blob:')) {
+          // Safety: remove any blob URLs that weren't uploaded (failed uploads, etc.)
+          delete finalFinishImages[finish];
         }
-        await supabase.from('products').update({
-          specifications: { ...payload.specifications, finishImages: finalFinishImages }
-        }).eq('id', productId);
       }
+      // Always update specifications with sanitized finishImages
+      await supabase.from('products').update({
+        specifications: { ...payload.specifications, finishImages: finalFinishImages }
+      }).eq('id', productId);
 
 
 
@@ -330,11 +347,19 @@ export default function ProductClient({ initialProducts, initialCategories, init
       let finalImageUrl = existingCatImageUrl;
 
       if (catImageFile) {
-        const fileExt = catImageFile.name.split('.').pop();
+        let optimizedCatImage;
+        try {
+          optimizedCatImage = await optimizeImage(catImageFile);
+        } catch {
+          optimizedCatImage = catImageFile;
+        }
+        const fileExt = optimizedCatImage.name.split('.').pop();
         const fileName = `cat_${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, catImageFile);
+        const { error: uploadError } = await supabase.storage.from('category').upload(fileName, optimizedCatImage, {
+          contentType: optimizedCatImage.type,
+        });
         if (!uploadError) {
-          const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(fileName);
+          const { data: { publicUrl } } = supabase.storage.from('category').getPublicUrl(fileName);
           finalImageUrl = publicUrl;
         }
       }
