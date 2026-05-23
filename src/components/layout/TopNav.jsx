@@ -38,7 +38,6 @@ export default function TopNav({ profile }) {
     { label: "Users", href: "/users" },
     { label: "QR Codes", href: "/qrcodes" },
     { label: "Settings", href: "/settings" },
-    { label: "Team", href: "/team" },
   ];
 
   const getInitials = (name) => {

@@ -66,7 +66,7 @@ export default function OrdersClient({ initialOrders, initialCount }) {
       let query = supabase
         .from("orders")
         .select(
-          `*, dealer:profiles!dealer_id(id, full_name, phone, business_name, city, state)`,
+          `*, dealer:profiles!dealer_id(id, full_name, phone), organization:organizations!organization_id(id, name, city, state)`,
           { count: "exact" }
         )
         .order("created_at", { ascending: false })
@@ -128,9 +128,10 @@ export default function OrdersClient({ initialOrders, initialCount }) {
         .from("orders")
         .select(
           `*, 
-          dealer:profiles!dealer_id(id, full_name, phone, business_name, city, state, address),
+          dealer:profiles!dealer_id(id, full_name, phone),
+          organization:organizations!organization_id(id, name, city, state, address),
           order_items(
-            id, quantity, unit_price, total_price, product_name, variant_label, sku, variant_details,
+            id, quantity, unit_price, total_price, product_name, variant_details,
             product:products(id, name, name_hi)
           )`
         )
@@ -302,7 +303,7 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                   <div className="flex justify-between">
                     <span className="text-sm text-gray-500">Business</span>
                     <span className="text-sm font-medium text-gray-900">
-                      {selectedOrder.dealer?.business_name || "—"}
+                      {selectedOrder.organization?.name || "—"}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -316,7 +317,7 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                     <span className="text-sm text-gray-500">Location</span>
                     <span className="text-sm font-medium text-gray-900 text-right flex items-center gap-1">
                       <MapPin size={12} className="text-gray-400 flex-shrink-0" />
-                      {[selectedOrder.dealer?.city, selectedOrder.dealer?.state]
+                      {[selectedOrder.organization?.city, selectedOrder.organization?.state]
                         .filter(Boolean)
                         .join(", ") || "—"}
                     </span>
@@ -357,10 +358,10 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                       </TableCell>
                       <TableCell>
                         <p className="text-sm text-gray-700">
-                          {item.variant_label || "—"}
+                          {item.variant_label || item.variant_details?.variant_label || (item.variant_details?.finish && item.variant_details?.size ? `${item.variant_details.finish} / ${item.variant_details.size}` : "—")}
                         </p>
                         <p className="text-xs text-gray-400">
-                          {item.sku || ""}
+                          {item.sku || item.variant_details?.sku || ""}
                         </p>
                       </TableCell>
                       <TableCell className="text-right font-medium">

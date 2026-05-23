@@ -19,6 +19,8 @@ import {
   Calendar,
   Package,
   QrCode,
+  Building2,
+  UserCheck,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { useLoader } from "@/components/providers/LoaderProvider";
@@ -40,11 +42,13 @@ const PAGE_SIZE = 20;
 
 export default function UsersClient({ initialUsers, initialCount }) {
   const [users, setUsers] = useState(initialUsers || []);
+  const [organizations, setOrganizations] = useState([]);
   const [totalCount, setTotalCount] = useState(initialCount || 0);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedOrg, setSelectedOrg] = useState(null);
   const [showActionMenu, setShowActionMenu] = useState(null);
 
   const { isLoading, setLoading } = useLoader();
@@ -53,29 +57,51 @@ export default function UsersClient({ initialUsers, initialCount }) {
   const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
-      let query = supabase
-        .from("profiles")
-        .select("*", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .range((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE - 1);
+      if (filterRole === "organization") {
+        let query = supabase
+          .from("organizations")
+          .select(`
+            *,
+            creator:profiles!created_by(id, full_name, phone),
+            members:organization_members(id, is_active)
+          `, { count: "exact" })
+          .order("created_at", { ascending: false })
+          .range((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE - 1);
 
-      if (filterRole !== "all") {
-        query = query.eq("role", filterRole);
+        if (searchQuery.trim()) {
+          query = query.or(`name.ilike.%${searchQuery}%,gst_number.ilike.%${searchQuery}%`);
+        }
+
+        const { data, count, error } = await query;
+        if (error) throw error;
+
+        setOrganizations(data || []);
+        setTotalCount(count || 0);
+      } else {
+        let query = supabase
+          .from("profiles")
+          .select("*", { count: "exact" })
+          .order("created_at", { ascending: false })
+          .range((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE - 1);
+
+        if (filterRole !== "all") {
+          query = query.eq("role", filterRole);
+        }
+
+        if (searchQuery.trim()) {
+          query = query.or(
+            `full_name.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%`
+          );
+        }
+
+        const { data, count, error } = await query;
+        if (error) throw error;
+
+        setUsers(data || []);
+        setTotalCount(count || 0);
       }
-
-      if (searchQuery.trim()) {
-        query = query.or(
-          `full_name.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%,business_name.ilike.%${searchQuery}%`
-        );
-      }
-
-      const { data, count, error } = await query;
-      if (error) throw error;
-
-      setUsers(data || []);
-      setTotalCount(count || 0);
     } catch (err) {
-      console.error("Failed to fetch users:", err);
+      console.error("Failed to fetch:", err);
     } finally {
       setLoading(false);
     }
@@ -131,15 +157,133 @@ export default function UsersClient({ initialUsers, initialCount }) {
           .limit(5),
       ]);
 
+      let staffMembers = [];
+      let orgMembers = [];
+      let belongsTo = null;
+
+      if (user.role === 'carpenter') {
+        const { data: acceptedInvites } = await supabase
+          .from("invitations")
+          .select("id, accepted_by")
+          .eq("invited_by", user.id)
+          .eq("status", "accepted");
+
+        if (acceptedInvites && acceptedInvites.length > 0) {
+          const memberIds = acceptedInvites.map(i => i.accepted_by).filter(Boolean);
+          const inviteIds = acceptedInvites.map(i => i.id);
+          const { data: staffData } = await supabase
+            .from("organization_members")
+            .select(`
+              id,
+              role_name,
+              joined_at,
+              profile:profiles!member_id(id, full_name, phone, role, status, total_points)
+            `)
+            .in("member_id", memberIds)
+            .in("invitation_id", inviteIds)
+            .eq("is_active", true);
+          staffMembers = staffData || [];
+        }
+      } else if (user.role === 'dealer') {
+        const { data: orgData } = await supabase
+          .from("organizations")
+          .select("id")
+          .eq("created_by", user.id)
+          .limit(1);
+          
+        if (orgData && orgData.length > 0) {
+          const orgId = orgData[0].id;
+          const { data: membersData } = await supabase
+            .from("organization_members")
+            .select(`
+              id,
+              role_name,
+              joined_at,
+              profile:profiles!member_id(id, full_name, phone, role, status, total_points)
+            `)
+            .eq("organization_id", orgId)
+            .eq("is_active", true);
+          orgMembers = membersData || [];
+        }
+      } else if (user.role === 'member') {
+        const { data: memberOrgLink } = await supabase
+          .from("organization_members")
+          .select(`
+            id,
+            organization_id,
+            invitation_id
+          `)
+          .eq("member_id", user.id)
+          .eq("is_active", true)
+          .limit(1);
+
+        if (memberOrgLink && memberOrgLink.length > 0) {
+          const link = memberOrgLink[0];
+          if (link.organization_id) {
+            const { data: orgDetail } = await supabase
+              .from("organizations")
+              .select(`
+                id,
+                name,
+                creator:profiles!created_by(id, full_name, phone)
+              `)
+              .eq("id", link.organization_id)
+              .single();
+            if (orgDetail) belongsTo = { type: 'organization', name: orgDetail.name, owner: orgDetail.creator };
+          } else if (link.invitation_id) {
+            const { data: inviteDetail } = await supabase
+              .from("invitations")
+              .select(`
+                id,
+                inviter:profiles!invited_by(id, full_name, phone)
+              `)
+              .eq("id", link.invitation_id)
+              .single();
+            if (inviteDetail) belongsTo = { type: 'carpenter', name: inviteDetail.inviter.full_name, owner: inviteDetail.inviter };
+          }
+        }
+      }
+
       setSelectedUser({
         ...user,
         recentOrders: ordersRes.data || [],
         recentPoints: pointsRes.data || [],
         recentScans: scansRes.data || [],
+        staffMembers,
+        orgMembers,
+        belongsTo,
       });
     } catch (err) {
       console.error(err);
       setSelectedUser(user);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleViewOrgDetails = async (org) => {
+    try {
+      setLoading(true);
+      const { data: members, error } = await supabase
+        .from("organization_members")
+        .select(`
+          id,
+          role_name,
+          joined_at,
+          profile:profiles!member_id(id, full_name, phone, role, status, total_points)
+        `)
+        .eq("organization_id", org.id)
+        .eq("is_active", true);
+
+      if (error) throw error;
+
+      setSelectedOrg({
+        ...org,
+        members: members || []
+      });
+    } catch (err) {
+      console.error("Failed to fetch org details:", err);
+      toast.error("Failed to fetch organization details");
     } finally {
       setLoading(false);
     }
@@ -308,6 +452,301 @@ export default function UsersClient({ initialUsers, initialCount }) {
                 </div>
               </div>
             </div>
+
+            {/* Team Members Card */}
+            {selectedUser.role === 'carpenter' && (
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-gray-200">
+                  <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
+                    <UserCheck size={14} className="text-primary" /> Staff Members (Carpentry Team)
+                  </h3>
+                </div>
+                <div className="p-5">
+                  {(selectedUser.staffMembers || []).length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader className="bg-gray-50">
+                          <TableRow>
+                            <TableHead>Staff Member</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Phone</TableHead>
+                            <TableHead>Points Bal.</TableHead>
+                            <TableHead>Joined</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedUser.staffMembers.map((staff) => (
+                            <TableRow key={staff.id} className="hover:bg-gray-50/50 cursor-pointer" onClick={() => setSelectedUser(staff.profile || staff)}>
+                              <TableCell>
+                                <p className="font-semibold text-gray-900 text-sm">{staff.profile?.full_name || "Unnamed Staff"}</p>
+                              </TableCell>
+                              <TableCell>
+                                <Badge className="bg-orange-50 text-orange-600 border-0 font-semibold text-[10px]">
+                                  {staff.role_name || "Staff"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs text-gray-600">{staff.profile?.phone || "—"}</span>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-sm font-bold text-gray-950">{(staff.profile?.total_points || 0).toLocaleString("en-IN")} pts</span>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs text-gray-500">{formatDate(staff.joined_at)}</span>
+                              </TableCell>
+                              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-primary hover:text-primary/80 text-xs font-semibold"
+                                  onClick={() => setSelectedUser(staff.profile || staff)}
+                                >
+                                  View details
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 text-center py-4">No staff members registered under this carpenter</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {selectedUser.role === 'dealer' && (
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-gray-200">
+                  <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
+                    <Building2 size={14} className="text-primary" /> Organization Team Members (Dealer Team)
+                  </h3>
+                </div>
+                <div className="p-5">
+                  {(selectedUser.orgMembers || []).length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader className="bg-gray-50">
+                          <TableRow>
+                            <TableHead>Team Member</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Phone</TableHead>
+                            <TableHead>Points Bal.</TableHead>
+                            <TableHead>Joined</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedUser.orgMembers.map((member) => (
+                            <TableRow key={member.id} className="hover:bg-gray-50/50 cursor-pointer" onClick={() => setSelectedUser(member.profile || member)}>
+                              <TableCell>
+                                <p className="font-semibold text-gray-900 text-sm">{member.profile?.full_name || "Unnamed Staff"}</p>
+                              </TableCell>
+                              <TableCell>
+                                <Badge className="bg-blue-50 text-blue-600 border-0 font-semibold text-[10px]">
+                                  {member.role_name || "Staff"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs text-gray-600">{member.profile?.phone || "—"}</span>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-sm font-bold text-gray-950">{(member.profile?.total_points || 0).toLocaleString("en-IN")} pts</span>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs text-gray-500">{formatDate(member.joined_at)}</span>
+                              </TableCell>
+                              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-primary hover:text-primary/80 text-xs font-semibold"
+                                  onClick={() => setSelectedUser(member.profile || member)}
+                                >
+                                  View details
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 text-center py-4">No team members registered under this dealer organization</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {selectedUser.role === 'member' && selectedUser.belongsTo && (
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <UserCheck size={14} className="text-primary" /> Associated Team
+                </h3>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center text-primary text-lg font-bold">
+                      {selectedUser.belongsTo.type === 'organization' ? <Building2 size={24} /> : <UsersIcon size={24} />}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900">{selectedUser.belongsTo.name}</p>
+                      <p className="text-xs text-gray-400">
+                        {selectedUser.belongsTo.type === 'organization' ? "Dealer Organization" : "Carpenter Team"} · Owned by {selectedUser.belongsTo.owner?.full_name || "—"}
+                      </p>
+                    </div>
+                  </div>
+                  {selectedUser.belongsTo.owner && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-gray-200 text-gray-700 font-semibold"
+                      onClick={() => setSelectedUser(selectedUser.belongsTo.owner)}
+                    >
+                      View Owner Profile
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Organization Detail View
+  if (selectedOrg) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden bg-gray-50">
+        <PageHeader title="Organizations">
+          <button className="h-full flex items-center border-b-2 border-primary text-primary font-semibold">
+            Organization Details
+          </button>
+        </PageHeader>
+
+        <div className="p-6 flex-1 overflow-auto">
+          <div className="max-w-5xl mx-auto space-y-6">
+            <button
+              onClick={() => setSelectedOrg(null)}
+              className="flex items-center gap-2 text-sm text-gray-500 hover:text-primary transition-colors font-medium"
+            >
+              <ArrowLeft size={16} /> Back to Organizations
+            </button>
+
+            {/* Org Header Card */}
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex items-start gap-5">
+                <div className="w-16 h-16 bg-primary rounded-xl flex items-center justify-center flex-shrink-0 text-white">
+                  <Building2 size={32} />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-1">
+                    <h2 className="text-xl font-bold text-gray-900">{selectedOrg.name || "Unnamed Organization"}</h2>
+                    <Badge className={`text-[10px] font-bold tracking-wider uppercase border-0 ${selectedOrg.kyc_verified ? "bg-green-50 text-green-600" : "bg-yellow-50 text-yellow-600"}`}>
+                      {selectedOrg.kyc_verified ? "KYC Verified" : "KYC Pending"}
+                    </Badge>
+                  </div>
+                  {selectedOrg.gst_number && (
+                    <p className="text-sm text-gray-500 font-medium">GSTIN: {selectedOrg.gst_number}</p>
+                  )}
+                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    {selectedOrg.phone && (
+                      <span className="flex items-center gap-1"><Phone size={12} /> {selectedOrg.phone}</span>
+                    )}
+                    {(selectedOrg.city || selectedOrg.state) && (
+                      <span className="flex items-center gap-1"><MapPin size={12} /> {[selectedOrg.city, selectedOrg.state].filter(Boolean).join(", ")}</span>
+                    )}
+                    <span className="flex items-center gap-1"><Calendar size={12} /> Registered {formatDate(selectedOrg.created_at)}</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-3xl font-bold text-primary">{selectedOrg.members?.length || 0}</p>
+                  <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Total Members</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Members Section */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-gray-200">
+                <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
+                  <UserCheck size={14} className="text-primary" /> Members List
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead>User</TableHead>
+                      <TableHead>Org Role</TableHead>
+                      <TableHead>Contact</TableHead>
+                      <TableHead>Points Bal.</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedOrg.members.map((mem) => {
+                      const profile = mem.profile || {};
+                      return (
+                        <TableRow key={mem.id} className="hover:bg-gray-50/50 cursor-pointer" onClick={() => { setSelectedUser(profile); setSelectedOrg(null); }}>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0 text-primary font-bold text-xs">
+                                {(profile.full_name || "M").charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-semibold text-gray-900 text-sm">{profile.full_name || "Unnamed Member"}</p>
+                                <p className="text-xs text-gray-400 capitalize">{profile.role || "Member"}</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="bg-gray-100 text-gray-700 border-0 font-bold text-[10px] uppercase">
+                              {mem.role_name || "Staff"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs text-gray-600 flex items-center gap-1">
+                              <Phone size={11} className="text-gray-400" /> {profile.phone || "—"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm font-bold text-gray-900">
+                              {(profile.total_points || 0).toLocaleString("en-IN")} pts
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={`text-[9px] font-bold tracking-wider uppercase border-0 ${getStatusBadge(profile.status || "active")}`}>
+                              {profile.status || "active"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-primary hover:text-primary/80 text-xs font-semibold"
+                              onClick={() => { setSelectedUser(profile); setSelectedOrg(null); }}
+                            >
+                              View Details
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {selectedOrg.members.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-8 text-gray-400 text-sm">
+                          No members in this organization.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -348,6 +787,16 @@ export default function UsersClient({ initialUsers, initialCount }) {
         >
           Carpenters
         </button>
+        <button
+          onClick={() => { setFilterRole("organization"); setCurrentPage(1); }}
+          className={`h-full flex items-center border-b-2 transition-colors ${
+            filterRole === "organization"
+              ? "border-primary text-primary font-semibold"
+              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
+          }`}
+        >
+          Organizations
+        </button>
       </PageHeader>
 
       <div className="p-6 flex-1 overflow-hidden flex flex-col">
@@ -387,90 +836,151 @@ export default function UsersClient({ initialUsers, initialCount }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((user) => (
-                  <TableRow key={user.id} className="hover:bg-gray-50/50 cursor-pointer transition-colors" onClick={() => handleViewDetails(user)}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                          {user.avatar_url ? (
-                            <img src={user.avatar_url} alt="" className="w-full h-full object-cover rounded-lg" />
-                          ) : (
-                            <span className="text-primary font-bold text-sm">
-                              {(user.full_name || "U").charAt(0).toUpperCase()}
-                            </span>
-                          )}
+                {filterRole === "organization" ? (
+                  organizations.map((org) => (
+                    <TableRow key={org.id} className="hover:bg-gray-50/50 cursor-pointer transition-colors" onClick={() => handleViewOrgDetails(org)}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0 text-primary">
+                            <Building2 size={16} />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-gray-900">{org.name || "Unnamed Org"}</p>
+                            {org.gst_number && <p className="text-xs text-gray-400">GST: {org.gst_number}</p>}
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-semibold text-gray-900">{user.full_name || "Unnamed"}</p>
-                          {user.business_name && <p className="text-xs text-gray-400">{user.business_name}</p>}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={`text-[10px] font-bold tracking-wider uppercase border-0 ${getRoleBadge(user.role)}`}>
-                        {user.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-gray-600 flex items-center gap-1.5">
-                        <Phone size={13} className="text-gray-400" /> {user.phone || "—"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm font-bold text-gray-900">
-                        {(user.total_points || 0).toLocaleString("en-IN")} pts
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-gray-500">{formatDate(user.created_at)}</span>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={`text-[10px] font-bold tracking-wider uppercase border-0 ${getStatusBadge(user.status || "active")}`}>
-                        {user.status || "active"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="relative inline-block">
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm font-medium text-gray-900">{org.creator?.full_name || "—"}</span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-gray-600 flex items-center gap-1.5">
+                          <Phone size={13} className="text-gray-400" /> {org.phone || org.creator?.phone || "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm font-semibold text-gray-700">
+                          {org.members?.filter(m => m.is_active).length || 0} members
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-gray-500">{formatDate(org.created_at)}</span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`text-[10px] font-bold tracking-wider uppercase border-0 ${org.kyc_verified ? "bg-green-50 text-green-600" : "bg-yellow-50 text-yellow-600"}`}>
+                          {org.kyc_verified ? "Verified" : "Pending"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-gray-400 hover:text-gray-700"
-                          onClick={() => setShowActionMenu(showActionMenu === user.id ? null : user.id)}
+                          size="sm"
+                          className="text-primary hover:text-primary/80 font-semibold"
+                          onClick={() => handleViewOrgDetails(org)}
                         >
-                          <MoreHorizontal size={16} />
+                          View Org
                         </Button>
-                        {showActionMenu === user.id && (
-                          <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
-                            <button
-                              className="w-full text-left px-4 py-2 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 text-gray-700"
-                              onClick={() => { handleViewDetails(user); setShowActionMenu(null); }}
-                            >
-                              <Eye size={14} className="text-gray-400" /> View Details
-                            </button>
-                            <button
-                              className="w-full text-left px-4 py-2 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 text-gray-700"
-                              onClick={() => handleToggleStatus(user.id, user.status || "active")}
-                            >
-                              {(user.status || "active") === "active" ? (
-                                <><ShieldX size={14} className="text-red-400" /> Suspend User</>
-                              ) : (
-                                <><ShieldCheck size={14} className="text-green-400" /> Activate User</>
-                              )}
-                            </button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  users.map((user) => (
+                    <TableRow key={user.id} className="hover:bg-gray-50/50 cursor-pointer transition-colors" onClick={() => handleViewDetails(user)}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                            {user.avatar_url ? (
+                              <img src={user.avatar_url} alt="" className="w-full h-full object-cover rounded-lg" />
+                            ) : (
+                              <span className="text-primary font-bold text-sm">
+                                {(user.full_name || "U").charAt(0).toUpperCase()}
+                              </span>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {users.length === 0 && (
+                          <div>
+                            <p className="font-semibold text-gray-900">{user.full_name || "Unnamed"}</p>
+                            {user.business_name && <p className="text-xs text-gray-400">{user.business_name}</p>}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`text-[10px] font-bold tracking-wider uppercase border-0 ${getRoleBadge(user.role)}`}>
+                          {user.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-gray-600 flex items-center gap-1.5">
+                          <Phone size={13} className="text-gray-400" /> {user.phone || "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm font-bold text-gray-900">
+                          {(user.total_points || 0).toLocaleString("en-IN")} pts
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-gray-500">{formatDate(user.created_at)}</span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`text-[10px] font-bold tracking-wider uppercase border-0 ${getStatusBadge(user.status || "active")}`}>
+                          {user.status || "active"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="relative inline-block">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-400 hover:text-gray-700"
+                            onClick={() => setShowActionMenu(showActionMenu === user.id ? null : user.id)}
+                          >
+                            <MoreHorizontal size={16} />
+                          </Button>
+                          {showActionMenu === user.id && (
+                            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
+                              <button
+                                className="w-full text-left px-4 py-2 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 text-gray-700"
+                                onClick={() => { handleViewDetails(user); setShowActionMenu(null); }}
+                              >
+                                <Eye size={14} className="text-gray-400" /> View Details
+                              </button>
+                              <button
+                                className="w-full text-left px-4 py-2 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 text-gray-700"
+                                onClick={() => handleToggleStatus(user.id, user.status || "active")}
+                              >
+                                {(user.status || "active") === "active" ? (
+                                  <><ShieldX size={14} className="text-red-400" /> Suspend User</>
+                                ) : (
+                                  <><ShieldCheck size={14} className="text-green-400" /> Activate User</>
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+                {((filterRole === "organization" ? organizations.length : users.length) === 0) && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-16 text-gray-500">
-                      <UsersIcon className="mx-auto h-12 w-12 text-gray-300 mb-3" />
-                      <p className="font-medium text-lg">No users found</p>
-                      <p className="text-sm text-gray-400 mt-1">
-                        {searchQuery ? "Try adjusting your search." : "Users will appear here when they register."}
-                      </p>
+                      {filterRole === "organization" ? (
+                        <>
+                          <Building2 className="mx-auto h-12 w-12 text-gray-300 mb-3" />
+                          <p className="font-medium text-lg">No organizations found</p>
+                          <p className="text-sm text-gray-400 mt-1">
+                            {searchQuery ? "Try adjusting your search query." : "Organizations will appear here once created."}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <UsersIcon className="mx-auto h-12 w-12 text-gray-300 mb-3" />
+                          <p className="font-medium text-lg">No users found</p>
+                          <p className="text-sm text-gray-400 mt-1">
+                            {searchQuery ? "Try adjusting your search." : "Users will appear here when they register."}
+                          </p>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 )}

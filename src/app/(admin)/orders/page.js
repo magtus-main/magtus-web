@@ -11,7 +11,7 @@ export default async function OrdersPage() {
   const { data: orders, count } = await supabase
     .from("orders")
     .select(
-      `*, dealer:profiles!dealer_id(id, full_name, phone, business_name, city, state)`,
+      `*, dealer:profiles!dealer_id(id, full_name, phone), organization:organizations!organization_id(id, name, city, state)`,
       { count: "exact" }
     )
     .order("created_at", { ascending: false })

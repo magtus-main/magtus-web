@@ -69,6 +69,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
   const [customHeight, setCustomHeight] = useState("");
   const [useCustomSize, setUseCustomSize] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
 
   const { isLoading, setLoading } = useLoader();
   const supabase = createClient();
@@ -235,6 +236,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
   const handleExportPDF = async () => {
     try {
       setPdfExporting(true);
+      setExportProgress("Fetching QRs...");
 
       // Determine sticker size in mm
       const stickerW = useCustomSize ? parseFloat(customWidth) : STICKER_PRESETS[stickerPreset].width;
@@ -266,123 +268,72 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         return;
       }
 
-      // A4 page dimensions in mm
-      const pageW = 210;
-      const pageH = 297;
-      const margin = 10;
-      const gap = 4;
-      const labelHeight = stickerW >= 38 ? 10 : 7;
+      const labelHeight = stickerW >= 38 ? 6 : 5;
       const totalStickerH = stickerH + labelHeight;
 
-      const cols = Math.floor((pageW - 2 * margin + gap) / (stickerW + gap));
-      const rows = Math.floor((pageH - 2 * margin + gap) / (totalStickerH + gap));
-      const perPage = cols * rows;
+      // Import JSZip dynamically
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const qrFolder = zip.folder("qr_stickers");
 
-      if (perPage < 1) {
-        toast.error("Sticker size is too large for an A4 page.");
-        setPdfExporting(false);
-        return;
+      for (let i = 0; i < allQRCodes.length; i++) {
+        const qr = allQRCodes[i];
+        setExportProgress(`Gen ${i + 1}/${allQRCodes.length}...`);
+
+        // Generate QR code as data URL
+        const qrDataUrl = await QRCode.toDataURL(qr.code, {
+          width: 400,
+          margin: 1,
+          errorCorrectionLevel: "M",
+        });
+
+        // Create individual PDF for this QR code matching sticker size exactly
+        const doc = new jsPDF({
+          orientation: "portrait",
+          unit: "mm",
+          format: [stickerW, totalStickerH],
+        });
+
+        // Draw QR code image
+        const qrImgSize = Math.min(stickerW, stickerH) - 2;
+        const qrX = (stickerW - qrImgSize) / 2;
+        const qrY = 1;
+        doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
+
+        // Set font size based on sticker width for QR ID
+        const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 5;
+        const textX = stickerW / 2;
+        const textY = stickerH + (labelHeight / 2) + 0.5;
+
+        // Draw only the QR ID so user can enter manually if they want
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(idFontSize);
+        doc.text(qr.code, textX, textY, { align: "center" });
+
+        // Output PDF to ArrayBuffer and add to zip folder
+        const pdfOutput = doc.output("arraybuffer");
+        const fileName = `${qr.code}.pdf`;
+        qrFolder.file(fileName, pdfOutput);
       }
 
-      // Center the grid on the page
-      const gridW = cols * stickerW + (cols - 1) * gap;
-      const gridH = rows * totalStickerH + (rows - 1) * gap;
-      const offsetX = (pageW - gridW) / 2;
-      const offsetY = (pageH - gridH) / 2;
+      setExportProgress("Archiving ZIP...");
+      const content = await zip.generateAsync({ type: "blob" });
 
-      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const totalPdfPages = Math.ceil(allQRCodes.length / perPage);
+      const url = URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `qr_stickers_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
 
-      for (let page = 0; page < totalPdfPages; page++) {
-        if (page > 0) doc.addPage();
-
-        const startIdx = page * perPage;
-        const endIdx = Math.min(startIdx + perPage, allQRCodes.length);
-
-        for (let i = startIdx; i < endIdx; i++) {
-          const qr = allQRCodes[i];
-          const posInPage = i - startIdx;
-          const col = posInPage % cols;
-          const row = Math.floor(posInPage / cols);
-
-          const x = offsetX + col * (stickerW + gap);
-          const y = offsetY + row * (totalStickerH + gap);
-
-          // Generate QR code as data URL
-          const qrDataUrl = await QRCode.toDataURL(qr.code, {
-            width: 400,
-            margin: 1,
-            errorCorrectionLevel: "M",
-          });
-
-          // Draw QR code image
-          const qrImgSize = Math.min(stickerW, stickerH) - 2;
-          const qrX = x + (stickerW - qrImgSize) / 2;
-          const qrY = y + 1;
-          doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
-
-          // Build label: Product Name - Finish - Size
-          const productName = qr.product?.name || "Unknown";
-          let variantLabel = "";
-          if (qr.sku) {
-            // SKU format: "finish-size" e.g. "Chrome-4inch"
-            const parts = qr.sku.split("-");
-            if (parts.length >= 2) {
-              const finish = parts.slice(0, -1).join("-");
-              const size = parts[parts.length - 1];
-              variantLabel = `${finish} - ${size}`;
-            } else {
-              variantLabel = qr.sku;
-            }
-          }
-
-          // Set font size based on sticker width
-          const nameFontSize = stickerW >= 50 ? 6 : stickerW >= 38 ? 5 : 4;
-          const variantFontSize = nameFontSize - 0.5;
-
-          const textX = x + stickerW / 2;
-          let textY = y + stickerH + 1;
-
-          // Product name
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(nameFontSize);
-          const maxChars = stickerW >= 50 ? 22 : 16;
-          const truncatedName = productName.length > maxChars
-            ? productName.substring(0, maxChars - 2) + "\u2026"
-            : productName;
-          doc.text(truncatedName, textX, textY, { align: "center" });
-
-          // Variant (finish - size)
-          if (variantLabel) {
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(variantFontSize);
-            textY += nameFontSize * 0.45;
-            doc.text(variantLabel, textX, textY, { align: "center" });
-          }
-
-          // Reward points
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(variantFontSize - 0.5);
-          textY += nameFontSize * 0.4;
-          doc.text(`+${qr.reward_points || 0} pts`, textX, textY, { align: "center" });
-        }
-
-        // Page footer
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(6);
-        doc.setTextColor(150);
-        doc.text(`Page ${page + 1} of ${totalPdfPages} | ${allQRCodes.length} stickers | Magtus`, pageW / 2, pageH - 4, { align: "center" });
-        doc.setTextColor(0);
-      }
-
-      doc.save(`qr_stickers_${new Date().toISOString().slice(0, 10)}.pdf`);
-      toast.success(`PDF exported with ${allQRCodes.length} QR stickers!`);
+      toast.success(`Exported ${allQRCodes.length} QR PDFs in a ZIP archive!`);
       setShowPdfModal(false);
     } catch (err) {
-      console.error("PDF export failed:", err);
-      toast.error("Failed to export PDF: " + (err.message || "Unknown error"));
+      console.error("PDF/ZIP export failed:", err);
+      toast.error("Failed to export: " + (err.message || "Unknown error"));
     } finally {
       setPdfExporting(false);
+      setExportProgress("");
     }
   };
 
@@ -725,7 +676,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
                 {pdfExporting ? (
                   <>
                     <RefreshCcw size={14} className="mr-2 animate-spin" />
-                    Generating...
+                    {exportProgress || "Generating..."}
                   </>
                 ) : (
                   <>
