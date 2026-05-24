@@ -19,6 +19,8 @@ import {
   Phone,
   MapPin,
   Calendar,
+  ShieldCheck,
+  Ban,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { useLoader } from "@/components/providers/LoaderProvider";
@@ -36,15 +38,24 @@ import {
 } from "@/components/ui/table";
 import PageHeader from "@/components/layout/PageHeader";
 
+// Order timeline: pending → confirmed → shipped → delivered  (cancel anytime)
+// DB enum: 'pending','confirmed','processing','shipped','delivered','cancelled','on_hold'
 const STATUS_OPTIONS = [
-  { value: "pending", label: "Pending", color: "bg-yellow-100 text-yellow-700", icon: Clock },
-  { value: "confirmed", label: "Confirmed", color: "bg-blue-100 text-blue-700", icon: CheckCircle2 },
-  { value: "processing", label: "Processing", color: "bg-purple-100 text-purple-700", icon: Package },
-  { value: "shipped", label: "Shipped", color: "bg-indigo-100 text-indigo-700", icon: Truck },
-  { value: "delivered", label: "Delivered", color: "bg-green-100 text-green-700", icon: CheckCircle2 },
-  { value: "cancelled", label: "Cancelled", color: "bg-red-100 text-red-700", icon: XCircle },
-  { value: "on_hold", label: "On Hold", color: "bg-gray-100 text-gray-600", icon: Clock },
+  { value: "pending",   label: "Pending",   color: "bg-yellow-100 text-yellow-700", icon: Clock },
+  { value: "confirmed", label: "Confirmed", color: "bg-blue-100 text-blue-700",     icon: ShieldCheck },
+  { value: "shipped",   label: "Shipped",   color: "bg-indigo-100 text-indigo-700", icon: Truck },
+  { value: "delivered", label: "Delivered",  color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
+  { value: "cancelled", label: "Cancelled", color: "bg-red-100 text-red-700",       icon: XCircle },
 ];
+
+const TIMELINE_STEPS = ["pending", "confirmed", "shipped", "delivered"];
+
+// Map current status → next forward action
+const NEXT_ACTION = {
+  pending:   { next: "confirmed", label: "Accept",    icon: ShieldCheck, className: "bg-blue-600 hover:bg-blue-700 text-white" },
+  confirmed: { next: "shipped",   label: "Shipped",   icon: Truck,       className: "bg-indigo-600 hover:bg-indigo-700 text-white" },
+  shipped:   { next: "delivered", label: "Delivered",  icon: CheckCircle2, className: "bg-green-600 hover:bg-green-700 text-white" },
+};
 
 const PAGE_SIZE = 15;
 
@@ -55,7 +66,7 @@ export default function OrdersClient({ initialOrders, initialCount }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [showStatusDropdown, setShowStatusDropdown] = useState(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(null);
 
   const { isLoading, setLoading } = useLoader();
   const supabase = createClient();
@@ -99,6 +110,27 @@ export default function OrdersClient({ initialOrders, initialCount }) {
   const handleStatusChange = async (orderId, newStatus) => {
     try {
       setLoading(true);
+
+      // Strict flow validation: only allow forward transitions or cancel
+      const currentOrder = orders.find(o => o.id === orderId) || selectedOrder;
+      const currentStatus = currentOrder?.status;
+      if (currentStatus === "delivered" || currentStatus === "cancelled") {
+        toast.error("Cannot change status of a completed or cancelled order");
+        return;
+      }
+      if (newStatus !== "cancelled") {
+        const currentIdx = TIMELINE_STEPS.indexOf(currentStatus);
+        const newIdx = TIMELINE_STEPS.indexOf(newStatus);
+        if (newIdx <= currentIdx) {
+          toast.error("Cannot move order status backwards");
+          return;
+        }
+        if (newIdx !== currentIdx + 1) {
+          toast.error("Cannot skip status steps");
+          return;
+        }
+      }
+
       const { error } = await supabase
         .from("orders")
         .update({ status: newStatus, updated_at: new Date().toISOString() })
@@ -112,7 +144,8 @@ export default function OrdersClient({ initialOrders, initialCount }) {
       if (selectedOrder?.id === orderId) {
         setSelectedOrder((prev) => ({ ...prev, status: newStatus }));
       }
-      setShowStatusDropdown(null);
+      setShowCancelConfirm(null);
+      toast.success(`Order ${newStatus === 'cancelled' ? 'cancelled' : 'updated to ' + newStatus}`);
     } catch (err) {
       console.error(err);
       toast.error("Failed to update status");
@@ -193,6 +226,12 @@ export default function OrdersClient({ initialOrders, initialCount }) {
   if (selectedOrder) {
     const statusConfig = getStatusConfig(selectedOrder.status);
     const StatusIcon = statusConfig.icon;
+    const isCancelled = selectedOrder.status === "cancelled";
+    const isDelivered = selectedOrder.status === "delivered";
+    const isTerminal = isCancelled || isDelivered;
+    const nextAction = NEXT_ACTION[selectedOrder.status];
+    const currentStepIndex = TIMELINE_STEPS.indexOf(selectedOrder.status);
+
     return (
       <div className="flex flex-col h-full overflow-hidden bg-gray-50">
         <PageHeader title="Orders">
@@ -224,6 +263,114 @@ export default function OrdersClient({ initialOrders, initialCount }) {
               </div>
             </div>
 
+            {/* Order Timeline */}
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-6">
+                Order Timeline
+              </h3>
+              {isCancelled ? (
+                <div className="flex items-center justify-center gap-3 py-4">
+                  <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                    <XCircle size={20} className="text-red-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-red-700">Order Cancelled</p>
+                    <p className="text-xs text-gray-400">This order has been cancelled.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between relative">
+                  {/* Background line */}
+                  <div className="absolute top-5 left-[5%] right-[5%] h-0.5 bg-gray-200 z-0" />
+                  {/* Progress line */}
+                  {currentStepIndex > 0 && (
+                    <div
+                      className="absolute top-5 left-[5%] h-0.5 bg-primary z-0 transition-all duration-500"
+                      style={{ width: `${(currentStepIndex / (TIMELINE_STEPS.length - 1)) * 90}%` }}
+                    />
+                  )}
+                  {TIMELINE_STEPS.map((step, idx) => {
+                    const stepConfig = getStatusConfig(step);
+                    const StepIcon = stepConfig.icon;
+                    const isCompleted = currentStepIndex >= idx;
+                    const isCurrent = currentStepIndex === idx;
+                    return (
+                      <div key={step} className="flex flex-col items-center z-10 relative" style={{ width: `${100 / TIMELINE_STEPS.length}%` }}>
+                        <div
+                          className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300 ${
+                            isCompleted
+                              ? isCurrent
+                                ? "bg-primary border-primary text-white shadow-lg shadow-primary/30 scale-110"
+                                : "bg-primary border-primary text-white"
+                              : "bg-white border-gray-300 text-gray-400"
+                          }`}
+                        >
+                          {isCompleted && !isCurrent ? (
+                            <CheckCircle2 size={18} />
+                          ) : (
+                            <StepIcon size={18} />
+                          )}
+                        </div>
+                        <span className={`mt-2 text-xs font-bold tracking-wider uppercase ${
+                          isCompleted ? "text-primary" : "text-gray-400"
+                        }`}>
+                          {stepConfig.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              {!isTerminal && (
+                <div className="flex items-center justify-end gap-3 mt-6 pt-5 border-t border-gray-100">
+                  <div className="relative">
+                    {showCancelConfirm === selectedOrder.id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500 font-medium">Cancel this order?</span>
+                        <Button
+                          size="sm"
+                          className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold tracking-wider"
+                          onClick={() => handleStatusChange(selectedOrder.id, "cancelled")}
+                        >
+                          Yes, Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs font-bold tracking-wider border-gray-300"
+                          onClick={() => setShowCancelConfirm(null)}
+                        >
+                          No
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-bold tracking-wider"
+                        onClick={() => setShowCancelConfirm(selectedOrder.id)}
+                      >
+                        <Ban size={14} className="mr-1.5" />
+                        Cancel Order
+                      </Button>
+                    )}
+                  </div>
+                  {nextAction && (
+                    <Button
+                      size="sm"
+                      className={`text-xs font-bold tracking-wider ${nextAction.className}`}
+                      onClick={() => handleStatusChange(selectedOrder.id, nextAction.next)}
+                    >
+                      <nextAction.icon size={14} className="mr-1.5" />
+                      {nextAction.label}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Order Info + Customer */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
@@ -251,40 +398,12 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Status</span>
-                    <div className="relative">
-                      <button
-                        onClick={() =>
-                          setShowStatusDropdown(
-                            showStatusDropdown === selectedOrder.id
-                              ? null
-                              : selectedOrder.id
-                          )
-                        }
-                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold tracking-wider uppercase cursor-pointer hover:opacity-80 transition-opacity ${statusConfig.color}`}
-                      >
-                        {statusConfig.label}
-                      </button>
-                      {showStatusDropdown === selectedOrder.id && (
-                        <div className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 min-w-[180px]">
-                          {STATUS_OPTIONS.map((opt) => (
-                            <button
-                              key={opt.value}
-                              onClick={() =>
-                                handleStatusChange(selectedOrder.id, opt.value)
-                              }
-                              className={`w-full text-left px-4 py-2 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 transition-colors ${
-                                selectedOrder.status === opt.value
-                                  ? "bg-gray-50 font-bold"
-                                  : ""
-                              }`}
-                            >
-                              <opt.icon size={14} className="text-gray-400" />
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold tracking-wider uppercase ${statusConfig.color}`}
+                    >
+                      <StatusIcon size={14} />
+                      {statusConfig.label}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -421,46 +540,26 @@ export default function OrdersClient({ initialOrders, initialCount }) {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-gray-50">
       <PageHeader title="Orders">
-        <button
-          onClick={() => setFilterStatus("all")}
-          className={`h-full flex items-center border-b-2 transition-colors ${
-            filterStatus === "all"
-              ? "border-primary text-primary font-semibold"
-              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
-          }`}
-        >
-          All Orders
-        </button>
-        <button
-          onClick={() => setFilterStatus("pending")}
-          className={`h-full flex items-center border-b-2 transition-colors ${
-            filterStatus === "pending"
-              ? "border-primary text-primary font-semibold"
-              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
-          }`}
-        >
-          Pending
-        </button>
-        <button
-          onClick={() => setFilterStatus("confirmed")}
-          className={`h-full flex items-center border-b-2 transition-colors ${
-            filterStatus === "confirmed"
-              ? "border-primary text-primary font-semibold"
-              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
-          }`}
-        >
-          Confirmed
-        </button>
-        <button
-          onClick={() => setFilterStatus("delivered")}
-          className={`h-full flex items-center border-b-2 transition-colors ${
-            filterStatus === "delivered"
-              ? "border-primary text-primary font-semibold"
-              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
-          }`}
-        >
-          Delivered
-        </button>
+        {[
+          { key: "all", label: "All Orders" },
+          { key: "pending", label: "Pending" },
+          { key: "confirmed", label: "Confirmed" },
+          { key: "shipped", label: "Shipped" },
+          { key: "delivered", label: "Delivered" },
+          { key: "cancelled", label: "Cancelled" },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => { setFilterStatus(tab.key); setCurrentPage(1); }}
+            className={`h-full flex items-center border-b-2 transition-colors ${
+              filterStatus === tab.key
+                ? "border-primary text-primary font-semibold"
+                : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </PageHeader>
 
       <div className="p-6 flex-1 overflow-hidden flex flex-col">
@@ -547,38 +646,11 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <div className="relative" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={() =>
-                              setShowStatusDropdown(
-                                showStatusDropdown === order.id ? null : order.id
-                              )
-                            }
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-bold tracking-wider uppercase cursor-pointer hover:opacity-80 transition-opacity ${sc.color}`}
-                          >
-                            {sc.label}
-                          </button>
-                          {showStatusDropdown === order.id && (
-                            <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
-                              {STATUS_OPTIONS.map((opt) => (
-                                <button
-                                  key={opt.value}
-                                  onClick={() =>
-                                    handleStatusChange(order.id, opt.value)
-                                  }
-                                  className={`w-full text-left px-3 py-2 text-xs font-medium flex items-center gap-2 hover:bg-gray-50 transition-colors ${
-                                    order.status === opt.value
-                                      ? "bg-gray-50 font-bold"
-                                      : ""
-                                  }`}
-                                >
-                                  <opt.icon size={12} className="text-gray-400" />
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-bold tracking-wider uppercase ${sc.color}`}
+                        >
+                          {sc.label}
+                        </span>
                       </TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <Button
