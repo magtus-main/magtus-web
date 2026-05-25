@@ -158,3 +158,43 @@ export async function rejectRedemption(requestId, reason) {
   return { success: true, data };
 }
 
+export async function fulfillRedemption(requestId) {
+  const cookieStore = await cookies();
+  const supabase = await createClient(cookieStore);
+
+  // Authenticate user
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    throw new Error("Unauthorized: Admin authorization required");
+  }
+
+  // Double check if admin
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (profileError || !profile || profile.role !== 'admin') {
+    throw new Error("Forbidden: Admin privileges required");
+  }
+
+  // Update status to fulfilled
+  const { data, error } = await supabase
+    .from("redemption_requests")
+    .update({
+      status: "fulfilled",
+      fulfilled_at: new Date().toISOString(),
+    })
+    .eq("id", requestId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error fulfilling redemption:", error);
+    throw new Error("Failed to fulfill redemption request: " + error.message);
+  }
+
+  return { success: true, data };
+}
+

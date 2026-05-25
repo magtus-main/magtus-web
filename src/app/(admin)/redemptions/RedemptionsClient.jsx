@@ -38,6 +38,7 @@ import {
   decryptRedemptionKyc,
   approveRedemption,
   rejectRedemption,
+  fulfillRedemption,
 } from "./actions";
 
 const PAGE_SIZE = 20;
@@ -46,7 +47,7 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
   const [requests, setRequests] = useState(initialRequests || []);
   const [totalCount, setTotalCount] = useState(initialCount || 0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterStatus, setFilterStatus] = useState("requested"); // 'requested' | 'approved' | 'rejected'
+  const [filterStatus, setFilterStatus] = useState("requested"); // 'requested' | 'approved' | 'fulfilled' | 'rejected'
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [decryptedKyc, setDecryptedKyc] = useState(null);
@@ -149,6 +150,24 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
     }
   };
 
+  const handleFulfill = async () => {
+    if (!selectedRequest) return;
+    try {
+      setLoading(true);
+      const res = await fulfillRedemption(selectedRequest.id);
+      if (res.success) {
+        toast.success("Redemption request marked as fulfilled!");
+        setSelectedRequest(null);
+        fetchRequests();
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(err.message || "Failed to fulfill request");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRejectSubmit = async (e) => {
     e.preventDefault();
     if (!selectedRequest) return;
@@ -191,6 +210,7 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
   };
 
   const getStatusBadge = (status) => {
+    if (status === "fulfilled") return "bg-blue-50 text-blue-600 border border-blue-200";
     if (status === "approved") return "bg-green-50 text-green-600 border border-green-200";
     if (status === "rejected") return "bg-red-50 text-red-600 border border-red-200";
     return "bg-yellow-50 text-yellow-600 border border-yellow-200";
@@ -217,7 +237,17 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
               : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
           }`}
         >
-          Completed Transfers
+          Approved
+        </button>
+        <button
+          onClick={() => { setFilterStatus("fulfilled"); setCurrentPage(1); }}
+          className={`h-full flex items-center border-b-2 transition-colors ${
+            filterStatus === "fulfilled"
+              ? "border-primary text-primary font-semibold"
+              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
+          }`}
+        >
+          Fulfilled
         </button>
         <button
           onClick={() => { setFilterStatus("rejected"); setCurrentPage(1); }}
@@ -327,7 +357,7 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
                         className="text-primary hover:bg-primary/5 font-bold"
                         onClick={() => handleOpenDetails(req)}
                       >
-                        {req.status === "requested" ? "Process Transfer" : "View Details"}
+                        {req.status === "requested" ? "Process Transfer" : req.status === "approved" ? "Mark Fulfilled" : "View Details"}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -500,6 +530,16 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
                   </div>
                 </div>
               )}
+
+              {selectedRequest.status === "fulfilled" && (
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex items-center gap-2">
+                  <CheckCircle size={18} className="text-blue-600 shrink-0" />
+                  <div>
+                    <span className="text-xs text-blue-700 font-bold block uppercase">Fulfilled & Closed</span>
+                    <p className="text-xs text-blue-600 font-medium">Fulfilled on {formatDate(selectedRequest.fulfilled_at)}</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Modal Actions Footer */}
@@ -553,6 +593,17 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
                     </Button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {selectedRequest.status === "approved" && (
+              <div className="p-6 border-t border-gray-150 bg-gray-50 flex justify-end gap-3 w-full">
+                <Button
+                  onClick={handleFulfill}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold flex items-center justify-center gap-2"
+                >
+                  <Gift size={14} /> Mark as Fulfilled (Complete Shipment / Reward Delivery)
+                </Button>
               </div>
             )}
           </div>
