@@ -70,6 +70,8 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
   const [useCustomSize, setUseCustomSize] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
+  const [exportFormat, setExportFormat] = useState("roll"); // "roll", "a4", "zip"
+  const [includeTextLabel, setIncludeTextLabel] = useState(true);
 
   const { isLoading, setLoading } = useLoader();
   const supabase = createClient();
@@ -238,11 +240,11 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
       setPdfExporting(true);
       setExportProgress("Fetching QRs...");
 
-      // Determine sticker size in mm
+      // Determine sticker size in mm (for A4 and ZIP formats)
       const stickerW = useCustomSize ? parseFloat(customWidth) : STICKER_PRESETS[stickerPreset].width;
       const stickerH = useCustomSize ? parseFloat(customHeight) : STICKER_PRESETS[stickerPreset].height;
 
-      if (!stickerW || !stickerH || stickerW < 15 || stickerH < 15) {
+      if ((exportFormat === "a4" || exportFormat === "zip") && (!stickerW || !stickerH || stickerW < 15 || stickerH < 15)) {
         toast.error("Sticker size must be at least 15mm.");
         setPdfExporting(false);
         return;
@@ -268,68 +270,212 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         return;
       }
 
-      const labelHeight = stickerW >= 38 ? 6 : 5;
-      const totalStickerH = stickerH + labelHeight;
-
-      // Import JSZip dynamically
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-      const qrFolder = zip.folder("qr_stickers");
-
-      for (let i = 0; i < allQRCodes.length; i++) {
-        const qr = allQRCodes[i];
-        setExportProgress(`Gen ${i + 1}/${allQRCodes.length}...`);
-
-        // Generate QR code as data URL
-        const qrDataUrl = await QRCode.toDataURL(qr.code, {
-          width: 400,
-          margin: 1,
-          errorCorrectionLevel: "M",
+      // 1. ROLL FORMAT: 4-Across Roll PDF (100x25mm rows)
+      if (exportFormat === "roll") {
+        const doc = new jsPDF({
+          orientation: "landscape",
+          unit: "mm",
+          format: [100, 25],
         });
 
-        // Create individual PDF for this QR code matching sticker size exactly
+        for (let i = 0; i < allQRCodes.length; i += 4) {
+          setExportProgress(`Row ${Math.floor(i / 4) + 1}/${Math.ceil(allQRCodes.length / 4)}...`);
+
+          if (i > 0) {
+            doc.addPage([100, 25], "landscape");
+          }
+
+          for (let col = 0; col < 4; col++) {
+            const qrIdx = i + col;
+            if (qrIdx < allQRCodes.length) {
+              const qr = allQRCodes[qrIdx];
+
+              // Generate QR code as data URL
+              const qrDataUrl = await QRCode.toDataURL(qr.code, {
+                width: 400,
+                margin: 1,
+                errorCorrectionLevel: "M",
+              });
+
+              // Centering calculations:
+              // Column width = 25mm. Centered QR Code bounding box.
+              // If includeTextLabel is true: qrSize = 16x16mm, centered horizontally, shifted up to y = 3.0mm.
+              // This leaves a 2.5mm horizontal margin (at col*25 + 4.5) and fits everything in the 20x20mm bounding box.
+              const qrSize = includeTextLabel ? 16 : 20;
+              const qrX = col * 25 + (25 - qrSize) / 2;
+              const qrY = includeTextLabel ? 3.0 : 2.5;
+
+              doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
+
+              if (includeTextLabel) {
+                // Centered at x = col * 25 + 12.5, y = 21.8 (within 20x20mm print area limit)
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(4.2); // sharp, clear 4pt font
+                doc.text(qr.code, col * 25 + 12.5, 21.8, { align: "center" });
+              }
+            }
+          }
+        }
+
+        setExportProgress("Downloading PDF...");
+        const pdfOutput = doc.output("blob");
+        const url = URL.createObjectURL(pdfOutput);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `qr_roll_4across_${new Date().toISOString().slice(0, 10)}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        toast.success(`Exported ${allQRCodes.length} QR codes in 4-Across Roll PDF!`);
+        setShowPdfModal(false);
+      } 
+      
+      // 2. A4 GRID FORMAT: Lays out stickers in grid on A4 sheet
+      else if (exportFormat === "a4") {
         const doc = new jsPDF({
           orientation: "portrait",
           unit: "mm",
-          format: [stickerW, totalStickerH],
+          format: "a4",
         });
 
-        // Draw QR code image
-        const qrImgSize = Math.min(stickerW, stickerH) - 2;
-        const qrX = (stickerW - qrImgSize) / 2;
-        const qrY = 1;
-        doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
+        const labelH = includeTextLabel ? (stickerW >= 38 ? 6 : 5) : 0;
+        const cellW = stickerW;
+        const cellH = stickerH + labelH;
+        const gap = 2; // spacing between stickers
 
-        // Set font size based on sticker width for QR ID
-        const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 5;
-        const textX = stickerW / 2;
-        const textY = stickerH + (labelHeight / 2) + 0.5;
+        // Margins and printable grid size
+        const marginX = 10;
+        const marginY = 10;
+        const colsCount = Math.max(1, Math.floor((210 - 2 * marginX + gap) / (cellW + gap)));
+        const rowsCount = Math.max(1, Math.floor((297 - 2 * marginY + gap) / (cellH + gap)));
+        const perPage = colsCount * rowsCount;
 
-        // Draw only the QR ID so user can enter manually if they want
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(idFontSize);
-        doc.text(qr.code, textX, textY, { align: "center" });
+        // Auto-center grid inside A4 page dimensions
+        const totalGridW = colsCount * cellW + (colsCount - 1) * gap;
+        const totalGridH = rowsCount * cellH + (rowsCount - 1) * gap;
+        const startX = (210 - totalGridW) / 2;
+        const startY = (297 - totalGridH) / 2;
 
-        // Output PDF to ArrayBuffer and add to zip folder
-        const pdfOutput = doc.output("arraybuffer");
-        const fileName = `${qr.code}.pdf`;
-        qrFolder.file(fileName, pdfOutput);
+        for (let i = 0; i < allQRCodes.length; i++) {
+          setExportProgress(`Page ${Math.floor(i / perPage) + 1} (${i + 1}/${allQRCodes.length})...`);
+
+          if (i > 0 && i % perPage === 0) {
+            doc.addPage("a4", "portrait");
+          }
+
+          const pageIdx = i % perPage;
+          const colIdx = pageIdx % colsCount;
+          const rowIdx = Math.floor(pageIdx / colsCount);
+
+          const xOffset = startX + colIdx * (cellW + gap);
+          const yOffset = startY + rowIdx * (cellH + gap);
+
+          const qr = allQRCodes[i];
+          const qrDataUrl = await QRCode.toDataURL(qr.code, {
+            width: 400,
+            margin: 1,
+            errorCorrectionLevel: "M",
+          });
+
+          if (includeTextLabel) {
+            const qrImgSize = Math.min(stickerW, stickerH) - 4;
+            const qrX = xOffset + (stickerW - qrImgSize) / 2;
+            const qrY = yOffset + 1.5;
+            doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
+
+            const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 5;
+            const textX = xOffset + stickerW / 2;
+            const textY = yOffset + stickerH + (labelH / 2) + 0.5;
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(idFontSize);
+            doc.text(qr.code, textX, textY, { align: "center" });
+          } else {
+            const qrImgSize = Math.min(stickerW, stickerH) - 2;
+            const qrX = xOffset + (stickerW - qrImgSize) / 2;
+            const qrY = yOffset + (stickerH - qrImgSize) / 2;
+            doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
+          }
+        }
+
+        setExportProgress("Downloading PDF...");
+        const pdfOutput = doc.output("blob");
+        const url = URL.createObjectURL(pdfOutput);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `qr_a4_grid_${new Date().toISOString().slice(0, 10)}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        toast.success(`Exported ${allQRCodes.length} QR codes in A4 Grid PDF!`);
+        setShowPdfModal(false);
+      } 
+      
+      // 3. ZIP FORMAT: Original Zip archive of individual label PDFs
+      else if (exportFormat === "zip") {
+        const labelHeight = stickerW >= 38 ? 6 : 5;
+        const totalStickerH = stickerH + labelHeight;
+
+        // Import JSZip dynamically
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        const qrFolder = zip.folder("qr_stickers");
+
+        for (let i = 0; i < allQRCodes.length; i++) {
+          const qr = allQRCodes[i];
+          setExportProgress(`ZIP ${i + 1}/${allQRCodes.length}...`);
+
+          // Generate QR code as data URL
+          const qrDataUrl = await QRCode.toDataURL(qr.code, {
+            width: 400,
+            margin: 1,
+            errorCorrectionLevel: "M",
+          });
+
+          // Create individual PDF for this QR code matching sticker size exactly
+          const doc = new jsPDF({
+            orientation: "portrait",
+            unit: "mm",
+            format: [stickerW, totalStickerH],
+          });
+
+          // Draw QR code image
+          const qrImgSize = Math.min(stickerW, stickerH) - 2;
+          const qrX = (stickerW - qrImgSize) / 2;
+          const qrY = 1;
+          doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
+
+          // Set font size based on sticker width for QR ID
+          const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 5;
+          const textX = stickerW / 2;
+          const textY = stickerH + (labelHeight / 2) + 0.5;
+
+          // Draw only the QR ID so user can enter manually if they want
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(idFontSize);
+          doc.text(qr.code, textX, textY, { align: "center" });
+
+          // Output PDF to ArrayBuffer and add to zip folder
+          const pdfOutput = doc.output("arraybuffer");
+          const fileName = `${qr.code}.pdf`;
+          qrFolder.file(fileName, pdfOutput);
+        }
+
+        setExportProgress("Archiving ZIP...");
+        const content = await zip.generateAsync({ type: "blob" });
+
+        const url = URL.createObjectURL(content);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `qr_stickers_${new Date().toISOString().slice(0, 10)}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        toast.success(`Exported ${allQRCodes.length} QR PDFs in a ZIP archive!`);
+        setShowPdfModal(false);
       }
-
-      setExportProgress("Archiving ZIP...");
-      const content = await zip.generateAsync({ type: "blob" });
-
-      const url = URL.createObjectURL(content);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `qr_stickers_${new Date().toISOString().slice(0, 10)}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      toast.success(`Exported ${allQRCodes.length} QR PDFs in a ZIP archive!`);
-      setShowPdfModal(false);
     } catch (err) {
-      console.error("PDF/ZIP export failed:", err);
+      console.error("PDF export failed:", err);
       toast.error("Failed to export: " + (err.message || "Unknown error"));
     } finally {
       setPdfExporting(false);
@@ -584,83 +730,231 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
             </div>
 
             {/* Body */}
-            <div className="p-6 space-y-5">
-              <p className="text-sm text-gray-500">
-                Generate a print-ready PDF with QR code stickers on A4 sheets. Only <strong>available</strong> (unscanned) QR codes will be exported.
+            <div className="p-6 space-y-5 text-left">
+              <p className="text-xs text-gray-500 leading-normal">
+                Choose the layout format below to generate print-ready QR codes. Only <strong>available</strong> (unscanned) QR codes will be exported.
               </p>
 
-              {/* Preset sizes */}
+              {/* Format selection tabs */}
               <div className="space-y-2">
-                <Label className="font-semibold text-gray-700 text-sm">Sticker Size</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {STICKER_PRESETS.map((preset, idx) => (
+                <Label className="font-semibold text-gray-700 text-sm">Print Layout Format</Label>
+                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-full border border-gray-200/50">
+                  {[
+                    { id: "roll", label: "4-Across Roll" },
+                    { id: "a4", label: "A4 Sheet Grid" },
+                    { id: "zip", label: "ZIP Archive" }
+                  ].map((fmt) => (
                     <button
-                      key={idx}
-                      onClick={() => { setStickerPreset(idx); setUseCustomSize(false); }}
-                      className={`px-3 py-2.5 rounded-lg border text-sm font-medium transition-all ${
-                        !useCustomSize && stickerPreset === idx
-                          ? "border-primary bg-primary/5 text-primary ring-2 ring-primary/20"
-                          : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                      key={fmt.id}
+                      type="button"
+                      onClick={() => setExportFormat(fmt.id)}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${
+                        exportFormat === fmt.id
+                          ? "bg-white text-primary shadow-sm border border-gray-200/40"
+                          : "text-gray-500 hover:text-gray-700 hover:bg-gray-200/40"
                       }`}
                     >
-                      {preset.label}
+                      {fmt.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Custom size toggle */}
-              <div className="space-y-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useCustomSize}
-                    onChange={(e) => setUseCustomSize(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary/20"
-                  />
-                  <span className="text-sm font-medium text-gray-700">Use custom size</span>
-                </label>
-                {useCustomSize && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-gray-500">Width (mm)</Label>
-                      <Input
-                        type="number"
-                        placeholder="e.g. 40"
-                        value={customWidth}
-                        onChange={(e) => setCustomWidth(e.target.value)}
-                        className="h-9 bg-gray-50"
-                      />
+              {/* Format-specific configurations */}
+              {exportFormat === "roll" && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="bg-primary/5 border border-primary/10 rounded-lg p-4 space-y-2">
+                    <p className="text-xs text-primary font-bold flex items-center gap-1.5">
+                      <Printer size={13} /> Custom for TSC TTP-244 Thermal Printer
+                    </p>
+                    <p className="text-xs text-gray-600 leading-relaxed">
+                      Generates a continuous landscape PDF matching a <strong>100mm wide roll</strong> (4 columns of 25x25mm stickers per row).
+                    </p>
+                    <ul className="text-[10px] text-gray-500 list-disc pl-4 space-y-1">
+                      <li>Total roll/page width: 100mm. Row height: 25mm.</li>
+                      <li>QR code centered perfectly inside each 25x25mm sticker.</li>
+                      <li>Includes a 2.5mm safe margin around edges to avoid feed clipping.</li>
+                    </ul>
+                  </div>
+
+                  {/* Label toggle checkbox */}
+                  <label className="flex items-center gap-3 cursor-pointer bg-gray-50 hover:bg-gray-100/70 p-3 rounded-lg border border-gray-150 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={includeTextLabel}
+                      onChange={(e) => setIncludeTextLabel(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary/20 accent-primary"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-semibold text-gray-700 block">Include code labels</span>
+                      <span className="text-[10px] text-gray-400 block">Prints a tiny, sharp 4.2pt text code under the QR code</span>
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-gray-500">Height (mm)</Label>
-                      <Input
-                        type="number"
-                        placeholder="e.g. 40"
-                        value={customHeight}
-                        onChange={(e) => setCustomHeight(e.target.value)}
-                        className="h-9 bg-gray-50"
-                      />
+                  </label>
+                </div>
+              )}
+
+              {exportFormat === "a4" && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <p className="text-xs text-gray-500 leading-normal">
+                    Lays out the QR codes in a standard grid on standard A4 paper (210×297mm). Perfect for sheet-fed desktop printers.
+                  </p>
+
+                  {/* Preset sizes */}
+                  <div className="space-y-2">
+                    <Label className="font-semibold text-gray-700 text-sm">Sticker Size</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {STICKER_PRESETS.map((preset, idx) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => { setStickerPreset(idx); setUseCustomSize(false); }}
+                          className={`px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                            !useCustomSize && stickerPreset === idx
+                              ? "border-primary bg-primary/5 text-primary ring-2 ring-primary/20"
+                              : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                )}
-              </div>
 
-              {/* Preview info */}
-              <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                <p className="text-xs text-gray-500">
-                  <strong>Sheet:</strong> A4 (210×297mm) &nbsp;|&nbsp;
-                  <strong>Size:</strong> {useCustomSize ? `${customWidth || "??"}×${customHeight || "??"}` : `${STICKER_PRESETS[stickerPreset].width}×${STICKER_PRESETS[stickerPreset].height}`}mm &nbsp;|&nbsp;
-                  <strong>Per page:</strong> ~{(() => {
-                    const w = useCustomSize ? parseFloat(customWidth) : STICKER_PRESETS[stickerPreset].width;
-                    const h = useCustomSize ? parseFloat(customHeight) : STICKER_PRESETS[stickerPreset].height;
-                    if (!w || !h || w < 15 || h < 15) return "?";
-                    const cols = Math.floor((210 - 20 + 4) / (w + 4));
-                    const rows = Math.floor((297 - 20 + 4) / ((h + (w >= 38 ? 10 : 7)) + 4));
-                    return cols * rows;
-                  })()} stickers
-                </p>
-              </div>
+                  {/* Custom size toggle */}
+                  <div className="space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useCustomSize}
+                        onChange={(e) => setUseCustomSize(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary/20 accent-primary"
+                      />
+                      <span className="text-xs font-semibold text-gray-700">Use custom sticker size</span>
+                    </label>
+                    {useCustomSize && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-gray-500 font-semibold">Width (mm)</Label>
+                          <Input
+                            type="number"
+                            placeholder="e.g. 40"
+                            value={customWidth}
+                            onChange={(e) => setCustomWidth(e.target.value)}
+                            className="h-8 bg-white text-xs focus-visible:ring-primary"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-gray-500 font-semibold">Height (mm)</Label>
+                          <Input
+                            type="number"
+                            placeholder="e.g. 40"
+                            value={customHeight}
+                            onChange={(e) => setCustomHeight(e.target.value)}
+                            className="h-8 bg-white text-xs focus-visible:ring-primary"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Label toggle checkbox */}
+                  <label className="flex items-center gap-3 cursor-pointer bg-gray-50 hover:bg-gray-100/70 p-3 rounded-lg border border-gray-100 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={includeTextLabel}
+                      onChange={(e) => setIncludeTextLabel(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary/20 accent-primary"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-semibold text-gray-700 block">Include code labels</span>
+                      <span className="text-[10px] text-gray-400 block">Prints a sharp text code under the QR code</span>
+                    </div>
+                  </label>
+
+                  {/* Preview info */}
+                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                    <p className="text-[11px] text-gray-500">
+                      <strong>Page format:</strong> A4 Sheet &nbsp;|&nbsp;
+                      <strong>Sticker:</strong> {useCustomSize ? `${customWidth || "??"}×${customHeight || "??"}` : `${STICKER_PRESETS[stickerPreset].width}×${STICKER_PRESETS[stickerPreset].height}`}mm &nbsp;|&nbsp;
+                      <strong>Per page:</strong> ~{(() => {
+                        const w = useCustomSize ? parseFloat(customWidth) : STICKER_PRESETS[stickerPreset].width;
+                        const h = useCustomSize ? parseFloat(customHeight) : STICKER_PRESETS[stickerPreset].height;
+                        if (!w || !h || w < 15 || h < 15) return "?";
+                        const cols = Math.floor((210 - 20 + 2) / (w + 2));
+                        const labelH = includeTextLabel ? (w >= 38 ? 6 : 5) : 0;
+                        const rows = Math.floor((297 - 20 + 2) / ((h + labelH) + 2));
+                        return cols * rows;
+                      })()} stickers
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {exportFormat === "zip" && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <p className="text-xs text-gray-500 leading-normal">
+                    Generates separate individual PDF files matching the exact sticker size, then packages them together in a single ZIP file. Useful for single label printing software.
+                  </p>
+
+                  {/* Preset sizes */}
+                  <div className="space-y-2">
+                    <Label className="font-semibold text-gray-700 text-sm">Sticker Size</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {STICKER_PRESETS.map((preset, idx) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => { setStickerPreset(idx); setUseCustomSize(false); }}
+                          className={`px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                            !useCustomSize && stickerPreset === idx
+                              ? "border-primary bg-primary/5 text-primary ring-2 ring-primary/20"
+                              : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Custom size toggle */}
+                  <div className="space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useCustomSize}
+                        onChange={(e) => setUseCustomSize(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary/20 accent-primary"
+                      />
+                      <span className="text-xs font-semibold text-gray-700">Use custom sticker size</span>
+                    </label>
+                    {useCustomSize && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-gray-500 font-semibold">Width (mm)</Label>
+                          <Input
+                            type="number"
+                            placeholder="e.g. 40"
+                            value={customWidth}
+                            onChange={(e) => setCustomWidth(e.target.value)}
+                            className="h-8 bg-white text-xs focus-visible:ring-primary"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] text-gray-500 font-semibold">Height (mm)</Label>
+                          <Input
+                            type="number"
+                            placeholder="e.g. 40"
+                            value={customHeight}
+                            onChange={(e) => setCustomHeight(e.target.value)}
+                            className="h-8 bg-white text-xs focus-visible:ring-primary"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer */}
