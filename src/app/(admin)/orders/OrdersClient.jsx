@@ -41,20 +41,20 @@ import PageHeader from "@/components/layout/PageHeader";
 // Order timeline: pending → confirmed → shipped → delivered  (cancel anytime)
 // DB enum: 'pending','confirmed','processing','shipped','delivered','cancelled','on_hold'
 const STATUS_OPTIONS = [
-  { value: "pending",   label: "Pending",   color: "bg-yellow-100 text-yellow-700", icon: Clock },
-  { value: "confirmed", label: "Confirmed", color: "bg-blue-100 text-blue-700",     icon: ShieldCheck },
-  { value: "shipped",   label: "Shipped",   color: "bg-indigo-100 text-indigo-700", icon: Truck },
-  { value: "delivered", label: "Delivered",  color: "bg-green-100 text-green-700",   icon: CheckCircle2 },
-  { value: "cancelled", label: "Cancelled", color: "bg-red-100 text-red-700",       icon: XCircle },
+  { value: "pending", label: "Pending", color: "bg-yellow-100 text-yellow-700", icon: Clock },
+  { value: "confirmed", label: "Confirmed", color: "bg-blue-100 text-blue-700", icon: ShieldCheck },
+  { value: "shipped", label: "Shipped", color: "bg-indigo-100 text-indigo-700", icon: Truck },
+  { value: "delivered", label: "Delivered", color: "bg-green-100 text-green-700", icon: CheckCircle2 },
+  { value: "cancelled", label: "Cancelled", color: "bg-red-100 text-red-700", icon: XCircle },
 ];
 
 const TIMELINE_STEPS = ["pending", "confirmed", "shipped", "delivered"];
 
 // Map current status → next forward action
 const NEXT_ACTION = {
-  pending:   { next: "confirmed", label: "Accept",    icon: ShieldCheck, className: "bg-blue-600 hover:bg-blue-700 text-white" },
-  confirmed: { next: "shipped",   label: "Shipped",   icon: Truck,       className: "bg-indigo-600 hover:bg-indigo-700 text-white" },
-  shipped:   { next: "delivered", label: "Delivered",  icon: CheckCircle2, className: "bg-green-600 hover:bg-green-700 text-white" },
+  pending: { next: "confirmed", label: "Accept", icon: ShieldCheck, className: "bg-blue-600 hover:bg-blue-700 text-white" },
+  confirmed: { next: "shipped", label: "Shipped", icon: Truck, className: "bg-indigo-600 hover:bg-indigo-700 text-white" },
+  shipped: { next: "delivered", label: "Delivered", icon: CheckCircle2, className: "bg-green-600 hover:bg-green-700 text-white" },
 };
 
 const PAGE_SIZE = 15;
@@ -297,13 +297,12 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                     return (
                       <div key={step} className="flex flex-col items-center z-10 relative" style={{ width: `${100 / TIMELINE_STEPS.length}%` }}>
                         <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300 ${
-                            isCompleted
+                          className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300 ${isCompleted
                               ? isCurrent
                                 ? "bg-primary border-primary text-white shadow-lg shadow-primary/30 scale-110"
                                 : "bg-primary border-primary text-white"
                               : "bg-white border-gray-300 text-gray-400"
-                          }`}
+                            }`}
                         >
                           {isCompleted && !isCurrent ? (
                             <CheckCircle2 size={18} />
@@ -311,9 +310,8 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                             <StepIcon size={18} />
                           )}
                         </div>
-                        <span className={`mt-2 text-xs font-bold tracking-wider uppercase ${
-                          isCompleted ? "text-primary" : "text-gray-400"
-                        }`}>
+                        <span className={`mt-2 text-xs font-bold tracking-wider uppercase ${isCompleted ? "text-primary" : "text-gray-400"
+                          }`}>
                           {stepConfig.label}
                         </span>
                       </div>
@@ -396,15 +394,6 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                       {formatCurrency(selectedOrder.total)}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-500">Status</span>
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold tracking-wider uppercase ${statusConfig.color}`}
-                    >
-                      <StatusIcon size={14} />
-                      {statusConfig.label}
-                    </span>
-                  </div>
                 </div>
               </div>
 
@@ -432,13 +421,11 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                       {selectedOrder.dealer?.phone || "—"}
                     </span>
                   </div>
-                  <div className="flex justify-between items-start">
-                    <span className="text-sm text-gray-500">Location</span>
-                    <span className="text-sm font-medium text-gray-900 text-right flex items-center gap-1">
-                      <MapPin size={12} className="text-gray-400 flex-shrink-0" />
-                      {[selectedOrder.organization?.city, selectedOrder.organization?.state]
-                        .filter(Boolean)
-                        .join(", ") || "—"}
+                  <div className="flex justify-between items-start gap-4">
+                    <span className="text-sm text-gray-500">Shipping Address</span>
+                    <span className="text-sm font-medium text-gray-900 text-right flex items-start gap-1 max-w-[200px]">
+                      <MapPin size={12} className="text-gray-400 mt-1 flex-shrink-0" />
+                      {selectedOrder.shipping_address || "—"}
                     </span>
                   </div>
                 </div>
@@ -496,15 +483,15 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                   ))}
                   {(!selectedOrder.order_items ||
                     selectedOrder.order_items.length === 0) && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="text-center py-8 text-gray-400"
-                      >
-                        No items in this order
-                      </TableCell>
-                    </TableRow>
-                  )}
+                      <TableRow>
+                        <TableCell
+                          colSpan={5}
+                          className="text-center py-8 text-gray-400"
+                        >
+                          No items in this order
+                        </TableCell>
+                      </TableRow>
+                    )}
                 </TableBody>
               </Table>
               {/* Total Footer */}
@@ -551,11 +538,10 @@ export default function OrdersClient({ initialOrders, initialCount }) {
           <button
             key={tab.key}
             onClick={() => { setFilterStatus(tab.key); setCurrentPage(1); }}
-            className={`h-full flex items-center border-b-2 transition-colors ${
-              filterStatus === tab.key
+            className={`h-full flex items-center border-b-2 transition-colors ${filterStatus === tab.key
                 ? "border-primary text-primary font-semibold"
                 : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
-            }`}
+              }`}
           >
             {tab.label}
           </button>

@@ -37,6 +37,7 @@ export default function TopNav({ profile }) {
     { label: "Orders", href: "/orders" },
     { label: "Users", href: "/users" },
     { label: "QR Codes", href: "/qrcodes" },
+    { label: "Redemptions", href: "/redemptions" },
     { label: "Settings", href: "/settings" },
   ];
 

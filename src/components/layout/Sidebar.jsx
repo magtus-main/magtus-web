@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Package, ShoppingCart, Settings, Users, Image as ImageIcon, Box, Phone, MessageSquare, BarChart2 } from "lucide-react";
+import { LayoutDashboard, Package, ShoppingCart, Settings, Users, Image as ImageIcon, Box, Phone, MessageSquare, BarChart2, Gift } from "lucide-react";
 
 export default function Sidebar() {
   const navItems = [
@@ -8,6 +8,7 @@ export default function Sidebar() {
     { icon: ShoppingCart, label: "Orders", href: "/orders" },
     { icon: Users, label: "Users", href: "/users" },
     { icon: Box, label: "QR Codes", href: "/qrcodes" },
+    { icon: Gift, label: "Redemptions", href: "/redemptions" },
     { icon: Settings, label: "Settings", href: "/settings" },
   ];
 
