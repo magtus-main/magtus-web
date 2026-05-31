@@ -40,7 +40,9 @@ import PageHeader from "@/components/layout/PageHeader";
 
 const PAGE_SIZE = 20;
 
-export default function UsersClient({ initialUsers, initialCount }) {
+import { hasModulePermission } from "@/utils/permissions";
+
+export default function UsersClient({ initialUsers, initialCount, profile, orgMember }) {
   const [users, setUsers] = useState(initialUsers || []);
   const [organizations, setOrganizations] = useState([]);
   const [totalCount, setTotalCount] = useState(initialCount || 0);
@@ -927,33 +929,41 @@ export default function UsersClient({ initialUsers, initialCount }) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="relative inline-block">
+                        <div className="flex items-center justify-end gap-1.5">
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-gray-400 hover:text-gray-700"
-                            onClick={() => setShowActionMenu(showActionMenu === user.id ? null : user.id)}
+                            className="h-8 w-8 text-gray-500 hover:text-black rounded-lg"
+                            onClick={() => handleViewDetails(user)}
+                            title="View Details"
                           >
-                            <MoreHorizontal size={16} />
+                            <Eye size={16} />
                           </Button>
-                          {showActionMenu === user.id && (
-                            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
-                              <button
-                                className="w-full text-left px-4 py-2 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 text-gray-700"
-                                onClick={() => { handleViewDetails(user); setShowActionMenu(null); }}
+                          
+                          {hasModulePermission(profile, orgMember, 'users', 'edit') && (
+                            <div className="relative inline-block">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-gray-400 hover:text-gray-700"
+                                onClick={() => setShowActionMenu(showActionMenu === user.id ? null : user.id)}
                               >
-                                <Eye size={14} className="text-gray-400" /> View Details
-                              </button>
-                              <button
-                                className="w-full text-left px-4 py-2 text-sm font-medium flex items-center gap-2 hover:bg-gray-50 text-gray-700"
-                                onClick={() => handleToggleStatus(user.id, user.status || "active")}
-                              >
-                                {(user.status || "active") === "active" ? (
-                                  <><ShieldX size={14} className="text-red-400" /> Suspend User</>
-                                ) : (
-                                  <><ShieldCheck size={14} className="text-green-400" /> Activate User</>
-                                )}
-                              </button>
+                                <MoreHorizontal size={16} />
+                              </Button>
+                              {showActionMenu === user.id && (
+                                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 min-w-[150px]">
+                                  <button
+                                    className="w-full text-left px-4 py-2 text-xs font-semibold flex items-center gap-2 hover:bg-gray-50 text-gray-700"
+                                    onClick={() => handleToggleStatus(user.id, user.status || "active")}
+                                  >
+                                    {(user.status || "active") === "active" ? (
+                                      <><ShieldX size={14} className="text-red-500" /> Suspend User</>
+                                    ) : (
+                                      <><ShieldCheck size={14} className="text-green-500" /> Activate User</>
+                                    )}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

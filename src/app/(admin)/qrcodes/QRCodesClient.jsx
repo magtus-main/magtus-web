@@ -17,6 +17,7 @@ import {
   ScanLine,
   FileText,
   X,
+  Lock,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { useLoader } from "@/components/providers/LoaderProvider";
@@ -37,6 +38,7 @@ import {
 import PageHeader from "@/components/layout/PageHeader";
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
+import { hasModulePermission } from "@/utils/permissions";
 
 const PAGE_SIZE = 20;
 
@@ -47,7 +49,7 @@ const STICKER_PRESETS = [
   { label: "XL (65×65 mm)", width: 65, height: 65 },
 ];
 
-export default function QRCodesClient({ initialProducts, initialQRCodes, initialCount }) {
+export default function QRCodesClient({ initialProducts, initialQRCodes, initialCount, profile, orgMember }) {
   const [products, setProducts] = useState(initialProducts || []);
   const [qrCodes, setQRCodes] = useState(initialQRCodes || []);
   const [totalCount, setTotalCount] = useState(initialCount || 0);
@@ -56,6 +58,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
   const [searchQuery, setSearchQuery] = useState("");
 
   // Generate form
+  const hasEditPermission = hasModulePermission(profile, orgMember, "qrcodes", "edit");
   const [selectedProduct, setSelectedProduct] = useState("");
   const [selectedVariant, setSelectedVariant] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -508,81 +511,83 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
 
       <div className="p-6 flex-1 overflow-hidden flex flex-col md:flex-row gap-6">
         {/* LEFT SIDE: GENERATE FORM */}
-        <div className="w-full md:w-[400px] flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm h-full flex-shrink-0">
-          <div className="p-6 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><QrCode size={18} className="text-primary" /> Generate QR Batch</h2>
-          </div>
-          <div className="p-6 flex-1 overflow-y-auto space-y-5">
-            <div className="space-y-1.5">
-              <Label className="font-semibold text-gray-700 text-sm">Select Product <span className="text-red-500">*</span></Label>
-              <select
-                className="w-full h-9 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
-                value={selectedProduct}
-                onChange={(e) => { setSelectedProduct(e.target.value); setSelectedVariant(""); }}
-              >
-                <option value="">Choose a product</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+        {hasEditPermission && (
+          <div className="w-full md:w-[400px] flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm h-full flex-shrink-0">
+            <div className="p-6 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><QrCode size={18} className="text-primary" /> Generate QR Batch</h2>
             </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold text-gray-700 text-sm">Variant (Optional)</Label>
-              <select
-                className="w-full h-9 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
-                value={selectedVariant}
-                onChange={(e) => setSelectedVariant(e.target.value)}
-                disabled={variants.length === 0}
-              >
-                <option value="">All Variants</option>
-                {variants.map((v) => (
-                  <option key={v.sku} value={v.sku}>{v.variant_label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="p-6 flex-1 overflow-y-auto space-y-5">
               <div className="space-y-1.5">
-                <Label className="font-semibold text-gray-700 text-sm">Quantity <span className="text-red-500">*</span></Label>
-                <Input
-                  type="number"
-                  placeholder="e.g. 500"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="bg-gray-50 h-9"
-                />
+                <Label className="font-semibold text-gray-700 text-sm">Select Product <span className="text-red-500">*</span></Label>
+                <select
+                  className="w-full h-9 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+                  value={selectedProduct}
+                  onChange={(e) => { setSelectedProduct(e.target.value); setSelectedVariant(""); }}
+                >
+                  <option value="">Choose a product</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
-                <Label className="font-semibold text-gray-700 text-sm">Points/Scan</Label>
-                <Input
-                  type="number"
-                  placeholder="e.g. 10"
-                  value={pointsPerScan}
-                  onChange={(e) => setPointsPerScan(e.target.value)}
-                  className="bg-gray-50 h-9"
+                <Label className="font-semibold text-gray-700 text-sm">Variant (Optional)</Label>
+                <select
+                  className="w-full h-9 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+                  value={selectedVariant}
+                  onChange={(e) => setSelectedVariant(e.target.value)}
+                  disabled={variants.length === 0}
+                >
+                  <option value="">All Variants</option>
+                  {variants.map((v) => (
+                    <option key={v.sku} value={v.sku}>{v.variant_label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="font-semibold text-gray-700 text-sm">Quantity <span className="text-red-500">*</span></Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 500"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="bg-gray-50 h-9"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="font-semibold text-gray-700 text-sm">Points/Scan</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 10"
+                    value={pointsPerScan}
+                    onChange={(e) => setPointsPerScan(e.target.value)}
+                    className="bg-gray-50 h-9"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="font-semibold text-gray-700 text-sm">Internal Batch Notes</Label>
+                <Textarea
+                  placeholder="Optional notes for this production batch..."
+                  rows={3}
+                  value={batchNotes}
+                  onChange={(e) => setBatchNotes(e.target.value)}
+                  className="bg-gray-50 resize-y text-sm"
                 />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold text-gray-700 text-sm">Internal Batch Notes</Label>
-              <Textarea
-                placeholder="Optional notes for this production batch..."
-                rows={3}
-                value={batchNotes}
-                onChange={(e) => setBatchNotes(e.target.value)}
-                className="bg-gray-50 resize-y text-sm"
-              />
+            <div className="p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+              <Button
+                onClick={handleGenerateBatch}
+                className="w-full bg-primary hover:bg-primary/90 text-white font-semibold"
+                disabled={isLoading}
+              >
+                {isLoading ? "GENERATING..." : "GENERATE BATCH"}
+              </Button>
             </div>
           </div>
-          <div className="p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
-            <Button
-              onClick={handleGenerateBatch}
-              className="w-full bg-primary hover:bg-primary/90 text-white font-semibold"
-              disabled={isLoading}
-            >
-              {isLoading ? "GENERATING..." : "GENERATE BATCH"}
-            </Button>
-          </div>
-        </div>
+        )}
 
         {/* RIGHT SIDE: INVENTORY */}
         <div className="flex flex-col flex-1 bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm h-full">
@@ -686,7 +691,9 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
                     <TableCell colSpan={7} className="text-center py-16 text-gray-500">
                       <QrCode className="mx-auto h-12 w-12 text-gray-300 mb-3" />
                       <p className="font-medium text-lg">No QR codes found</p>
-                      <p className="text-sm text-gray-400 mt-1">Generate a batch using the form on the left.</p>
+                      <p className="text-sm text-gray-400 mt-1">
+                        {hasEditPermission ? "Generate a batch using the form on the left." : "Please contact your administrator to generate QR codes."}
+                      </p>
                     </TableCell>
                   </TableRow>
                 )}

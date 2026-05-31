@@ -43,7 +43,9 @@ import {
 
 const PAGE_SIZE = 20;
 
-export default function RedemptionsClient({ initialRequests, initialCount }) {
+import { hasModulePermission } from "@/utils/permissions";
+
+export default function RedemptionsClient({ initialRequests, initialCount, profile, orgMember }) {
   const [requests, setRequests] = useState(initialRequests || []);
   const [totalCount, setTotalCount] = useState(initialCount || 0);
   const [searchQuery, setSearchQuery] = useState("");
@@ -357,7 +359,11 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
                         className="text-primary hover:bg-primary/5 font-bold"
                         onClick={() => handleOpenDetails(req)}
                       >
-                        {req.status === "requested" ? "Process Transfer" : req.status === "approved" ? "Mark Fulfilled" : "View Details"}
+                        {req.status === "requested" && hasModulePermission(profile, orgMember, "redemptions", "edit")
+                          ? "Process Transfer"
+                          : req.status === "approved" && hasModulePermission(profile, orgMember, "redemptions", "edit")
+                          ? "Mark Fulfilled"
+                          : "View Details"}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -543,7 +549,7 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
             </div>
 
             {/* Modal Actions Footer */}
-            {selectedRequest.status === "requested" && (
+            {selectedRequest.status === "requested" && hasModulePermission(profile, orgMember, "redemptions", "edit") && (
               <div className="p-6 border-t border-gray-150 bg-gray-50 flex flex-col gap-3">
                 {showRejectForm ? (
                   <form onSubmit={handleRejectSubmit} className="space-y-3 w-full">
@@ -596,7 +602,7 @@ export default function RedemptionsClient({ initialRequests, initialCount }) {
               </div>
             )}
 
-            {selectedRequest.status === "approved" && (
+            {selectedRequest.status === "approved" && hasModulePermission(profile, orgMember, "redemptions", "edit") && (
               <div className="p-6 border-t border-gray-150 bg-gray-50 flex justify-end gap-3 w-full">
                 <Button
                   onClick={handleFulfill}

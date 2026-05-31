@@ -19,14 +19,16 @@ import {
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/utils/supabase/client";
-import { Edit2, Image as ImageIcon, Languages, Package, RefreshCcw, Search, Trash2, Save } from "lucide-react";
+import { Edit2, Image as ImageIcon, Languages, Package, RefreshCcw, Search, Trash2, Save, Lock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { toast } from "react-hot-toast";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import ProductForm from "./ProductForm";
+import { hasModulePermission } from "@/utils/permissions";
 
-export default function ProductClient({ initialProducts, initialCategories, initialSubcategories }) {
+export default function ProductClient({ initialProducts, initialCategories, initialSubcategories, profile, orgMember }) {
+  const hasEditPermission = hasModulePermission(profile, orgMember, "products", "edit");
   const [activeTab, setActiveTab] = useState("all-products");
 
   const [products, setProducts] = useState(initialProducts || []);
@@ -64,6 +66,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
     description_hi: "",
     is_active: true,
     is_featured: false,
+    min_stock_level: "5",
   });
 
   const [productImages, setProductImages] = useState([]); // { file: File, url: string, isExisting: boolean, id?: string, is_primary?: boolean }
@@ -122,6 +125,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
       description_hi: product.description_hi || "",
       is_active: product.is_active ?? true,
       is_featured: product.is_featured ?? false,
+      min_stock_level: product.min_stock_level?.toString() || "5",
     });
 
     // Load existing images
@@ -148,7 +152,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
     setProductForm({
       name: "", name_hi: "", category_id: "", subcategory_id: "", mrp: "", dealer_price: "",
       reward_points: "", sku: "", unit: "piece", description: "",
-      description_hi: "", is_active: true, is_featured: false
+      description_hi: "", is_active: true, is_featured: false, min_stock_level: "5"
     });
     setProductImages([]);
     setCustomFields({});
@@ -219,6 +223,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
         description_hi: productForm.description_hi,
         is_active: productForm.is_active,
         is_featured: productForm.is_featured,
+        min_stock_level: parseInt(productForm.min_stock_level) || 5,
         specifications: {
           customFields: customFields,
           finishImages: finishImages,
@@ -510,15 +515,17 @@ export default function ProductClient({ initialProducts, initialCategories, init
           >
             All Products
           </button>
-          <button
-            onClick={handleAddNewProduct}
-            className={`h-full flex items-center border-b-2 transition-colors ${activeTab === "add-edit-product"
-              ? "border-primary text-primary font-semibold"
-              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
-              }`}
-          >
-            {editingProductId ? 'Edit Product Details' : 'Add New Product'}
-          </button>
+          {hasEditPermission && (
+            <button
+              onClick={handleAddNewProduct}
+              className={`h-full flex items-center border-b-2 transition-colors ${activeTab === "add-edit-product"
+                ? "border-primary text-primary font-semibold"
+                : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
+                }`}
+            >
+              {editingProductId ? 'Edit Product Details' : 'Add New Product'}
+            </button>
+          )}
           <button
             onClick={() => setActiveTab("categories")}
             className={`h-full flex items-center border-b-2 transition-colors ${activeTab === "categories"
@@ -609,7 +616,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
                     const rowKey = isVariant ? `${item.id}-${variant.finish}-${variant.size}` : item.id;
 
                     return (
-                      <TableRow key={rowKey} className="hover:bg-gray-50/50 cursor-pointer" onClick={() => handleEditProduct(item)}>
+                      <TableRow key={rowKey} className={hasEditPermission ? "hover:bg-gray-50/50 cursor-pointer" : "hover:bg-gray-50/50"} onClick={hasEditPermission ? () => handleEditProduct(item) : undefined}>
                         <TableCell className="font-medium text-gray-500">{idx + 1}</TableCell>
                         <TableCell>
                           <div className="w-12 h-12 bg-gray-100 rounded border border-gray-200 flex items-center justify-center overflow-hidden">
@@ -638,14 +645,18 @@ export default function ProductClient({ initialProducts, initialCategories, init
                           <span className="text-sm font-medium text-gray-600 capitalize">{item.unit || "Piece"}</span>
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-2" onClick={e => e.stopPropagation()}>
-                            <Button variant="ghost" size="icon" onClick={() => handleEditProduct(item)}>
-                              <Edit2 size={16} className="text-gray-600" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleDeleteProduct(item.id); }}>
-                              <Trash2 size={16} className="text-red-500" />
-                            </Button>
-                          </div>
+                          {hasEditPermission ? (
+                            <div className="flex justify-end gap-2" onClick={e => e.stopPropagation()}>
+                              <Button variant="ghost" size="icon" onClick={() => handleEditProduct(item)}>
+                                <Edit2 size={16} className="text-gray-600" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleDeleteProduct(item.id); }}>
+                                <Trash2 size={16} className="text-red-500" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <Badge className="bg-gray-100 text-gray-400 text-[10px] font-bold border-0 select-none"><Lock size={10} className="inline mr-0.5" /> View Only</Badge>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -692,7 +703,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
           {/* TAB 3: CATEGORIES / SUB CATEGORIES */}
           <TabsContent value="categories" className="flex-1 mt-0 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col md:flex-row h-full">
             {/* Left Side Form */}
-            <div className="w-full md:w-[400px] border-r border-gray-200 bg-gray-50 flex flex-col h-full flex-shrink-0">
+            {hasEditPermission && (
+              <div className="w-full md:w-[400px] border-r border-gray-200 bg-gray-50 flex flex-col h-full flex-shrink-0">
               <div className="p-6 border-b border-gray-200 bg-white flex-shrink-0">
                 <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">Add / Edit Category</h2>
               </div>
@@ -744,6 +756,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
                 </Button>
               </div>
             </div>
+            )}
 
             {/* Right Side List */}
             <div className="flex-1 overflow-y-auto bg-white p-6 md:p-8">
@@ -769,10 +782,12 @@ export default function ProductClient({ initialProducts, initialCategories, init
                           </div>
                         </div>
                       </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button variant="outline" size="sm" className="h-9 bg-white shadow-sm" onClick={() => handleEditCategory(category, false)}><Edit2 size={14} className="mr-2" /> Edit</Button>
-                        <Button variant="outline" size="icon" className="h-9 w-9 text-red-500 hover:text-red-600 hover:bg-red-50 bg-white border-gray-200 shadow-sm" onClick={() => handleDeleteCategory(category.id, false)}><Trash2 size={16} /></Button>
-                      </div>
+                      {hasEditPermission && (
+                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="outline" size="sm" className="h-9 bg-white shadow-sm" onClick={() => handleEditCategory(category, false)}><Edit2 size={14} className="mr-2" /> Edit</Button>
+                          <Button variant="outline" size="icon" className="h-9 w-9 text-red-500 hover:text-red-600 hover:bg-red-50 bg-white border-gray-200 shadow-sm" onClick={() => handleDeleteCategory(category.id, false)}><Trash2 size={16} /></Button>
+                        </div>
+                      )}
                     </div>
                     <div className="p-0 bg-white">
                       {subcategories.filter(s => s.category_id === category.id).length > 0 ? (
@@ -795,10 +810,14 @@ export default function ProductClient({ initialProducts, initialCategories, init
                                   {sub.name_hi && <p className="text-xs text-gray-500 font-medium mt-0.5">{sub.name_hi}</p>}
                                 </TableCell>
                                 <TableCell className="py-3 text-right pr-6">
-                                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-500 hover:text-gray-900 hover:bg-gray-100" onClick={() => handleEditCategory(sub, true)}><Edit2 size={15} /></Button>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => handleDeleteCategory(sub.id, true)}><Trash2 size={15} /></Button>
-                                  </div>
+                                  {hasEditPermission ? (
+                                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-500 hover:text-gray-900 hover:bg-gray-100" onClick={() => handleEditCategory(sub, true)}><Edit2 size={15} /></Button>
+                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => handleDeleteCategory(sub.id, true)}><Trash2 size={15} /></Button>
+                                    </div>
+                                  ) : (
+                                    <Badge className="bg-gray-50 text-gray-400 font-medium text-[10px] border-0"><Lock size={10} className="inline mr-0.5" /> Locked</Badge>
+                                  )}
                                 </TableCell>
                               </TableRow>
                             ))}

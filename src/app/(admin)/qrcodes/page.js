@@ -1,12 +1,16 @@
 import { createClient } from "@/utils/supabase/server";
 import { cookies } from "next/headers";
 import QRCodesClient from "./QRCodesClient";
+import { verifyServerPageAccess } from "@/utils/permissions";
 
 export const dynamic = 'force-dynamic';
 
 export default async function QRCodesPage() {
   const cookieStore = await cookies();
   const supabase = await createClient(cookieStore);
+
+  // Verify access
+  const { profile, orgMember } = await verifyServerPageAccess(supabase, "qrcodes", "view");
 
   // Fetch products for the dropdown
   const { data: products } = await supabase
@@ -30,6 +34,8 @@ export default async function QRCodesPage() {
       initialProducts={products || []}
       initialQRCodes={qrCodes || []}
       initialCount={count || 0}
+      profile={profile}
+      orgMember={orgMember}
     />
   );
 }

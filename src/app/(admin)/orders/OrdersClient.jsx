@@ -21,10 +21,12 @@ import {
   Calendar,
   ShieldCheck,
   Ban,
+  Upload,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { useLoader } from "@/components/providers/LoaderProvider";
 import { toast } from "react-hot-toast";
+import { hasOrderStepPermission } from "@/utils/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -68,8 +70,142 @@ export default function OrdersClient({ initialOrders, initialCount }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(null);
 
+  // Delivery proof states
+  const [showDeliveryModal, setShowDeliveryModal] = useState(null);
+  const [deliveryItemFile, setDeliveryItemFile] = useState(null);
+  const [deliveryChallanFile, setDeliveryChallanFile] = useState(null);
+  const [deliveryItemPreview, setDeliveryItemPreview] = useState(null);
+  const [deliveryChallanPreview, setDeliveryChallanPreview] = useState(null);
+  const [deliveryGps, setDeliveryGps] = useState(null);
+  const [fetchingWebGps, setFetchingWebGps] = useState(false);
+  const [submittingDelivery, setSubmittingDelivery] = useState(false);
+
+  const fetchBrowserGps = () => {
+    setFetchingWebGps(true);
+    if (!navigator.geolocation) {
+      toast.error("Geolocation is not supported by your browser");
+      setFetchingWebGps(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setDeliveryGps({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        toast.success("GPS coordinates attached successfully!");
+        setFetchingWebGps(false);
+      },
+      (error) => {
+        console.error(error);
+        toast.error("Failed to fetch GPS coordinates. Please allow location permissions.");
+        setFetchingWebGps(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  const handleSubmitDelivery = async () => {
+    if (!deliveryItemFile || !deliveryChallanFile || !deliveryGps) {
+      toast.error("Please provide both photos and GPS coordinates");
+      return;
+    }
+
+    try {
+      setSubmittingDelivery(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      const orderId = showDeliveryModal;
+
+      // 1. Upload Delivered Item Image
+      const itemPath = `${orderId}/item_${Date.now()}_${deliveryItemFile.name}`;
+      const { error: itemUploadErr } = await supabase.storage
+        .from("deliveries")
+        .upload(itemPath, deliveryItemFile);
+      if (itemUploadErr) throw new Error("Item photo upload failed: " + itemUploadErr.message);
+
+      const { data: itemUrlData } = supabase.storage.from("deliveries").getPublicUrl(itemPath);
+      const itemUrl = itemUrlData.publicUrl;
+
+      // 2. Upload Signed Challan Image
+      const challanPath = `${orderId}/challan_${Date.now()}_${deliveryChallanFile.name}`;
+      const { error: challanUploadErr } = await supabase.storage
+        .from("deliveries")
+        .upload(challanPath, deliveryChallanFile);
+      if (challanUploadErr) throw new Error("Challan photo upload failed: " + challanUploadErr.message);
+
+      const { data: challanUrlData } = supabase.storage.from("deliveries").getPublicUrl(challanPath);
+      const challanUrl = challanUrlData.publicUrl;
+
+      // 3. Call the secure complete_order_delivery RPC
+      const { data, error } = await supabase.rpc("complete_order_delivery", {
+        p_user_id: user.id,
+        p_order_id: orderId,
+        p_item_photo: itemUrl,
+        p_challan_photo: challanUrl,
+        p_lat: deliveryGps.latitude,
+        p_lng: deliveryGps.longitude
+      });
+
+      if (error) throw error;
+      if (data && !data.success) throw new Error(data.error);
+
+      // 4. Update local states
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status: "delivered", delivery_item_photo_url: itemUrl, delivery_challan_photo_url: challanUrl } : o))
+      );
+      if (selectedOrder?.id === orderId) {
+        setSelectedOrder((prev) => ({
+          ...prev,
+          status: "delivered",
+          delivery_item_photo_url: itemUrl,
+          delivery_challan_photo_url: challanUrl,
+          delivery_latitude: deliveryGps.latitude,
+          delivery_longitude: deliveryGps.longitude
+        }));
+      }
+
+      setShowDeliveryModal(null);
+      toast.success("Order successfully delivered!");
+    } catch (err) {
+      console.error(err);
+      toast.error(err.message || "Failed to submit delivery proof");
+    } finally {
+      setSubmittingDelivery(false);
+    }
+  };
+
   const { isLoading, setLoading } = useLoader();
   const supabase = createClient();
+
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const [orgMember, setOrgMember] = useState(null);
+
+  useEffect(() => {
+    async function fetchUserPermissions() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setCurrentUser(user);
+
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      setUserProfile(prof);
+
+      if (prof?.role === 'member') {
+        const { data: mem } = await supabase
+          .from('organization_members')
+          .select('*')
+          .eq('member_id', user.id)
+          .eq('is_active', true)
+          .maybeSingle();
+        setOrgMember(mem);
+      }
+    }
+    fetchUserPermissions();
+  }, []);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -131,12 +267,29 @@ export default function OrdersClient({ initialOrders, initialCount }) {
         }
       }
 
-      const { error } = await supabase
-        .from("orders")
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
-        .eq("id", orderId);
+      if (newStatus === "delivered") {
+        setDeliveryItemFile(null);
+        setDeliveryChallanFile(null);
+        setDeliveryItemPreview(null);
+        setDeliveryChallanPreview(null);
+        setDeliveryGps(null);
+        setShowDeliveryModal(orderId);
+        setTimeout(() => {
+          fetchBrowserGps();
+        }, 100);
+        setLoading(false);
+        return;
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase.rpc("update_order_status_checked", {
+        p_user_id: user.id,
+        p_order_id: orderId,
+        p_new_status: newStatus
+      });
 
       if (error) throw error;
+      if (data && !data.success) throw new Error(data.error);
 
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
@@ -323,39 +476,49 @@ export default function OrdersClient({ initialOrders, initialCount }) {
               {/* Action Buttons */}
               {!isTerminal && (
                 <div className="flex items-center justify-end gap-3 mt-6 pt-5 border-t border-gray-100">
-                  <div className="relative">
-                    {showCancelConfirm === selectedOrder.id ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500 font-medium">Cancel this order?</span>
-                        <Button
-                          size="sm"
-                          className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold tracking-wider"
-                          onClick={() => handleStatusChange(selectedOrder.id, "cancelled")}
-                        >
-                          Yes, Cancel
-                        </Button>
+                  {hasOrderStepPermission(userProfile, orgMember, "cancel") && (
+                    <div className="relative">
+                      {showCancelConfirm === selectedOrder.id ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500 font-medium">Cancel this order?</span>
+                          <Button
+                            size="sm"
+                            className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold tracking-wider"
+                            onClick={() => handleStatusChange(selectedOrder.id, "cancelled")}
+                          >
+                            Yes, Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-xs font-bold tracking-wider border-gray-300"
+                            onClick={() => setShowCancelConfirm(null)}
+                          >
+                            No
+                          </Button>
+                        </div>
+                      ) : (
                         <Button
                           size="sm"
                           variant="outline"
-                          className="text-xs font-bold tracking-wider border-gray-300"
-                          onClick={() => setShowCancelConfirm(null)}
+                          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-bold tracking-wider"
+                          onClick={() => setShowCancelConfirm(selectedOrder.id)}
                         >
-                          No
+                          <Ban size={14} className="mr-1.5" />
+                          Cancel Order
                         </Button>
-                      </div>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-bold tracking-wider"
-                        onClick={() => setShowCancelConfirm(selectedOrder.id)}
-                      >
-                        <Ban size={14} className="mr-1.5" />
-                        Cancel Order
-                      </Button>
-                    )}
-                  </div>
-                  {nextAction && (
+                      )}
+                    </div>
+                  )}
+                  {nextAction && hasOrderStepPermission(
+                    userProfile,
+                    orgMember,
+                    nextAction.next === "confirmed"
+                      ? "confirm"
+                      : nextAction.next === "shipped"
+                      ? "ship"
+                      : "deliver"
+                  ) && (
                     <Button
                       size="sm"
                       className={`text-xs font-bold tracking-wider ${nextAction.className}`}
@@ -507,6 +670,69 @@ export default function OrdersClient({ initialOrders, initialCount }) {
               </div>
             </div>
 
+            {/* Delivery Proof */}
+            {selectedOrder.status === "delivered" && selectedOrder.delivery_item_photo_url && (
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+                  Delivery Proof
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Delivered Item</p>
+                    <a
+                      href={selectedOrder.delivery_item_photo_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-lg overflow-hidden border border-gray-200 hover:opacity-90 transition-opacity"
+                    >
+                      <img
+                        src={selectedOrder.delivery_item_photo_url}
+                        alt="Delivered Item"
+                        className="w-full h-48 object-cover"
+                      />
+                    </a>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Signed Challan</p>
+                    <a
+                      href={selectedOrder.delivery_challan_photo_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-lg overflow-hidden border border-gray-200 hover:opacity-90 transition-opacity"
+                    >
+                      <img
+                        src={selectedOrder.delivery_challan_photo_url}
+                        alt="Signed Challan"
+                        className="w-full h-48 object-cover"
+                      />
+                    </a>
+                  </div>
+                </div>
+
+                {selectedOrder.delivery_latitude && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg bg-gray-50 border border-gray-100 mt-2">
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <MapPin size={16} className="text-primary flex-shrink-0" />
+                      <div>
+                        <p className="font-semibold text-gray-900">GPS Coordinates Attached</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Latitude: {selectedOrder.delivery_latitude.toFixed(6)}, Longitude: {selectedOrder.delivery_longitude.toFixed(6)}
+                        </p>
+                      </div>
+                    </div>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${selectedOrder.delivery_latitude},${selectedOrder.delivery_longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center px-4 py-2 bg-primary text-white text-xs font-semibold tracking-wider rounded-md hover:bg-primary/95 transition-colors"
+                    >
+                      View on Google Maps
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
             {selectedOrder.notes && (
               <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">
@@ -519,6 +745,164 @@ export default function OrdersClient({ initialOrders, initialCount }) {
             )}
           </div>
         </div>
+
+        {/* Delivery Finisher Web Modal */}
+        {showDeliveryModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-lg rounded-2xl border border-gray-100 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">Delivery Proof Required</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Please provide photos and GPS confirmation to deliver the order.</p>
+                </div>
+                <button
+                  onClick={() => setShowDeliveryModal(null)}
+                  disabled={submittingDelivery}
+                  className="p-1.5 rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-5 flex-1">
+                {/* 1. Delivered Item Image Upload */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">1. Delivered Item Photo *</label>
+                  {deliveryItemPreview ? (
+                    <div className="relative group rounded-xl overflow-hidden border border-gray-200 aspect-[16/9]">
+                      <img src={deliveryItemPreview} alt="Item Preview" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => {
+                          setDeliveryItemFile(null);
+                          setDeliveryItemPreview(null);
+                        }}
+                        disabled={submittingDelivery}
+                        className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 bg-gray-50 hover:bg-gray-100/50 rounded-xl aspect-[16/9] cursor-pointer group transition-all">
+                      <Upload className="w-8 h-8 text-primary group-hover:scale-110 transition-transform duration-200" />
+                      <span className="text-xs font-semibold text-primary mt-2">Upload Item Photo</span>
+                      <span className="text-[10px] text-gray-400 mt-1">Drag and drop or browse files</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setDeliveryItemFile(file);
+                            setDeliveryItemPreview(URL.createObjectURL(file));
+                          }
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* 2. Signed Challan Image Upload */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">2. Signed Challan Photo *</label>
+                  {deliveryChallanPreview ? (
+                    <div className="relative group rounded-xl overflow-hidden border border-gray-200 aspect-[16/9]">
+                      <img src={deliveryChallanPreview} alt="Challan Preview" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => {
+                          setDeliveryChallanFile(null);
+                          setDeliveryChallanPreview(null);
+                        }}
+                        disabled={submittingDelivery}
+                        className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 bg-gray-50 hover:bg-gray-100/50 rounded-xl aspect-[16/9] cursor-pointer group transition-all">
+                      <Upload className="w-8 h-8 text-primary group-hover:scale-110 transition-transform duration-200" />
+                      <span className="text-xs font-semibold text-primary mt-2">Upload Signed Challan</span>
+                      <span className="text-[10px] text-gray-400 mt-1">Drag and drop or browse files</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setDeliveryChallanFile(file);
+                            setDeliveryChallanPreview(URL.createObjectURL(file));
+                          }
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* 3. GPS Location Confirmation */}
+                <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">3. GPS Confirmation *</span>
+                    <button
+                      type="button"
+                      onClick={fetchBrowserGps}
+                      disabled={fetchingWebGps || submittingDelivery}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 disabled:opacity-50 transition-colors"
+                    >
+                      <RefreshCcw size={12} className={fetchingWebGps ? "animate-spin" : ""} />
+                      Refresh Location
+                    </button>
+                  </div>
+
+                  {fetchingWebGps ? (
+                    <div className="flex items-center gap-2 py-1 text-xs text-gray-500">
+                      <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      Fetching high-accuracy coordinates...
+                    </div>
+                  ) : deliveryGps ? (
+                    <div className="flex items-center gap-2 py-1 text-xs text-green-700 font-semibold bg-green-50 px-3 py-2 rounded-lg border border-green-100">
+                      <CheckCircle2 size={16} className="text-green-600" />
+                      Attached Coordinates: Lat {deliveryGps.latitude.toFixed(6)}, Lng {deliveryGps.longitude.toFixed(6)}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 py-1 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100">
+                      <XCircle size={16} className="text-red-500" />
+                      GPS coordinates are required to confirm delivery.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3 flex-shrink-0">
+                <Button
+                  variant="outline"
+                  type="button"
+                  disabled={submittingDelivery}
+                  onClick={() => setShowDeliveryModal(null)}
+                  className="border-gray-200 text-gray-600 hover:bg-gray-100 text-xs font-bold tracking-wider"
+                >
+                  CANCEL
+                </Button>
+                <Button
+                  onClick={handleSubmitDelivery}
+                  disabled={!deliveryItemFile || !deliveryChallanFile || !deliveryGps || submittingDelivery}
+                  className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold tracking-wider disabled:opacity-50"
+                >
+                  {submittingDelivery ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      DELIVERING...
+                    </div>
+                  ) : (
+                    "SUBMIT & DELIVER"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

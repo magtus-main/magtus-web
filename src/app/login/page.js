@@ -12,7 +12,8 @@ export default function LoginPage() {
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [otpHash, setOtpHash] = useState("");
-  const [step, setStep] = useState(1); // 1: Phone, 2: OTP
+  const [step, setStep] = useState(1); // 1: Phone, 2: OTP, 3: Invite Code
+  const [inviteCode, setInviteCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
@@ -69,29 +70,86 @@ export default function LoginPage() {
 
         if (signInError) throw new Error("Failed to create session");
 
-        // Verify admin
+        // Verify admin or admin team member access
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User session not found.");
 
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
+        const { data: accessData } = await supabase.rpc('can_access_admin_portal', { p_user_id: user.id });
         
-        if (profileData?.role !== 'admin') {
-          await supabase.auth.signOut();
-          throw new Error("Access denied. Admin privileges required.");
+        if (accessData?.allowed) {
+          isSuccess = true;
+          router.push("/");
+          router.refresh();
+          return;
         }
 
-        isSuccess = true;
-        router.push("/");
-        router.refresh();
+        // If the account is suspended/blocked, throw the specific block error directly!
+        if (accessData?.error && (accessData.error.toLowerCase().includes("blocked") || accessData.error.toLowerCase().includes("suspended"))) {
+          await supabase.auth.signOut();
+          throw new Error(accessData.error);
+        }
+
+        // Access not allowed yet — check if there is a pending admin invitation (organization_id IS NULL) for this phone using secure RPC
+        const { data: hasInvite, error: inviteError } = await supabase.rpc('has_pending_admin_invitation', {
+          p_user_id: user.id,
+          p_phone: phone
+        });
+
+        if (!inviteError && hasInvite) {
+          // Go to Step 3 to let them input their invite code
+          setStep(3);
+          setLoading(false);
+          return;
+        }
+
+        // If no pending invite, deny access and sign out
+        await supabase.auth.signOut();
+        throw new Error("Access denied. Admin privileges or pending admin invitation required.");
       } else {
         throw new Error("Invalid verification response.");
       }
     } catch (err) {
       setError(err.message || "Failed to verify OTP.");
+    } finally {
+      if (!isSuccess) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleAcceptInvite = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    let isSuccess = false;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("User session not found. Please log in again.");
+
+      // Accept invitation
+      const { data, error: acceptError } = await supabase.rpc('accept_invitation', {
+        p_invite_code: inviteCode,
+        p_user_id: user.id
+      });
+
+      if (acceptError) throw acceptError;
+      if (data && !data.success) throw new Error(data.error || "Invalid or expired invite code.");
+
+      // Re-verify admin team access
+      const { data: accessData } = await supabase.rpc('can_access_admin_portal', { p_user_id: user.id });
+      
+      if (!accessData?.allowed) {
+        await supabase.auth.signOut();
+        throw new Error(accessData?.error || "Access denied after accepting invitation.");
+      }
+
+      isSuccess = true;
+      router.push("/");
+      router.refresh();
+    } catch (err) {
+      setError(err.message || "Failed to verify invite code.");
     } finally {
       if (!isSuccess) {
         setLoading(false);
@@ -107,8 +165,10 @@ export default function LoginPage() {
             <span className="text-white font-bold text-2xl">M</span>
           </div>
           <CardTitle className="text-2xl font-bold tracking-tight">Magtus Admin</CardTitle>
-          <CardDescription className="text-sm">
-            {step === 1 ? "Sign in via WhatsApp OTP to manage the platform" : "Enter the 6-digit code sent to your WhatsApp"}
+          <CardDescription className="text-sm text-gray-500">
+            {step === 1 && "Sign in via WhatsApp OTP to manage the platform"}
+            {step === 2 && "Enter the 6-digit code sent to your WhatsApp"}
+            {step === 3 && "You have a pending admin team invitation! Enter your invite code below to join."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -118,7 +178,7 @@ export default function LoginPage() {
             </div>
           )}
           
-          {step === 1 ? (
+          {step === 1 && (
             <form onSubmit={handleSendOtp} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone Number</Label>
@@ -144,7 +204,9 @@ export default function LoginPage() {
                 {loading ? "Sending..." : "Send WhatsApp OTP"}
               </Button>
             </form>
-          ) : (
+          )}
+
+          {step === 2 && (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="otp">Verification Code</Label>
@@ -172,6 +234,38 @@ export default function LoginPage() {
                 disabled={loading}
               >
                 Use a different number
+              </Button>
+            </form>
+          )}
+
+          {step === 3 && (
+            <form onSubmit={handleAcceptInvite} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="inviteCode">Invite Code</Label>
+                <Input 
+                  id="inviteCode" 
+                  type="text" 
+                  placeholder="INV-XXXXXXXX" 
+                  value={inviteCode}
+                  onChange={(e) => {
+                    setInviteCode(e.target.value.trim().toUpperCase());
+                    setError("");
+                  }}
+                  className="text-center tracking-widest text-lg font-mono focus-visible:ring-black uppercase"
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full bg-black hover:bg-gray-800 text-white mt-6" disabled={loading}>
+                {loading ? "Joining Team..." : "Verify Invite Code"}
+              </Button>
+              <Button 
+                type="button" 
+                variant="ghost" 
+                className="w-full mt-2 text-sm text-gray-500 hover:text-black" 
+                onClick={() => { setStep(1); setInviteCode(""); }}
+                disabled={loading}
+              >
+                Go Back
               </Button>
             </form>
           )}

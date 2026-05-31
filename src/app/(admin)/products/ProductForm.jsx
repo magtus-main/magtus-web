@@ -61,7 +61,7 @@ export default function ProductForm({
     for (const row of rowValues) {
       for (const col of colValues) {
         const found = existing.find(m => m.finish === row && m.size === col);
-        newMatrix.push(found || { finish: row, size: col, mrp: "", dealer_price: "", reward_points: "", stock: "" });
+        newMatrix.push(found || { finish: row, size: col, mrp: "", dealer_price: "", reward_points: "", stock: "", min_stock: "" });
       }
     }
     setPriceMatrix(newMatrix);
@@ -172,6 +172,10 @@ export default function ProductForm({
                       <option value="kg">Kilogram (kg)</option>
                       <option value="liter">Liter (L)</option>
                     </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-semibold text-gray-700">Default Min Stock</Label>
+                    <Input type="number" placeholder="5" value={productForm.min_stock_level || ""} onChange={(e) => setProductForm({ ...productForm, min_stock_level: e.target.value })} className="bg-gray-50" />
                   </div>
                 </div>
                 {/* Toggle switches */}
@@ -303,6 +307,7 @@ export default function ProductForm({
                               { key: "dealer_price", label: "DP", type: "number" },
                               { key: "reward_points", label: "Pts", type: "number" },
                               { key: "stock", label: "Stk", type: "number" },
+                              { key: "min_stock", label: "Min Stk", type: "number" },
                             ];
                             return subRows.map((sub, si) => (
                               <tr key={`${row}-${sub.key}`} className={`${si === subRows.length - 1 ? 'border-b-2 border-gray-200' : 'border-b border-gray-100'}`}>
