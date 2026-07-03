@@ -118,18 +118,21 @@ export default function ProductForm({
                       <Input placeholder="हिंदी नाम" value={productForm.name_hi} onChange={(e) => setProductForm({ ...productForm, name_hi: e.target.value })} className="bg-gray-50 focus-visible:bg-white" />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="font-semibold text-gray-700 text-sm">Category <span className="text-red-500">*</span></Label>
-                      <select className="w-full h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-50" value={productForm.category_id} onChange={(e) => setProductForm({ ...productForm, category_id: e.target.value })}>
-                        <option value="">Select</option>
-                        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      <Label className="font-semibold text-gray-700 text-sm">Subcategory</Label>
+                      <select className="w-full h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-50" value={productForm.subcategory_id} onChange={(e) => {
+                        const subId = e.target.value;
+                        const selectedSub = subcategories.find(s => s.id === subId);
+                        setProductForm({ ...productForm, subcategory_id: subId, category_id: selectedSub ? selectedSub.category_id : '' });
+                      }}>
+                        <option value="">Optional</option>
+                        {subcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="font-semibold text-gray-700 text-sm">Subcategory</Label>
-                      <select className="w-full h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-50" value={productForm.subcategory_id} onChange={(e) => setProductForm({ ...productForm, subcategory_id: e.target.value })}>
-                        <option value="">Optional</option>
-                        {subcategories.filter(s => !productForm.category_id || s.category_id === productForm.category_id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
+                      <Label className="font-semibold text-gray-700 text-sm">Category <span className="text-red-500">*</span></Label>
+                      <div className="w-full h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-100 flex items-center text-gray-700">
+                        {categories.find(c => c.id === productForm.category_id)?.name || <span className="text-gray-400">Auto-selected from subcategory</span>}
+                      </div>
                     </div>
 
                   </div>
