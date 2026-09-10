@@ -11,7 +11,7 @@ export default async function ProfilePage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     const { redirect } = require("next/navigation");
-    redirect('/login');
+    redirect('/magtus-login');
   }
 
   const { data: profile } = await supabase

@@ -131,3 +131,240 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 }
+
+/* ========== Coming Soon Page ========== */
+.coming-soon-root {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-family: var(--font-sans);
+}
+
+.coming-soon-bg {
+  position: absolute;
+  inset: 0;
+  /* Replace this with your background image: url('/coming-soon-bg.jpg') */
+  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+}
+
+.coming-soon-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    160deg,
+    rgba(15, 12, 41, 0.85) 0%,
+    rgba(48, 43, 99, 0.7) 50%,
+    rgba(36, 36, 62, 0.85) 100%
+  );
+  z-index: 1;
+}
+
+.coming-soon-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3rem 1.5rem;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.coming-soon-logo-wrap {
+  margin-bottom: 2rem;
+  animation: fadeInDown 0.8s ease-out;
+}
+
+.coming-soon-logo {
+  filter: brightness(0) invert(1);
+  width: 180px;
+  height: auto;
+}
+
+.coming-soon-heading {
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.75rem;
+  animation: fadeInUp 0.8s ease-out 0.2s both;
+}
+
+.coming-soon-subtext {
+  font-size: 1.15rem;
+  color: rgba(255, 255, 255, 0.65);
+  margin-bottom: 2.5rem;
+  animation: fadeInUp 0.8s ease-out 0.35s both;
+}
+
+/* Timer */
+.coming-soon-timer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  animation: fadeInUp 0.8s ease-out 0.5s both;
+}
+
+.timer-unit {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  min-width: 90px;
+  text-align: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.timer-unit:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(79, 58, 48, 0.25);
+}
+
+.timer-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 0.5rem;
+  font-weight: 600;
+}
+
+.timer-colon {
+  font-size: 2rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.35);
+  padding-bottom: 1.25rem;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* Footer */
+.coming-soon-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  padding-top: 3rem;
+  animation: fadeInUp 0.8s ease-out 0.65s both;
+}
+
+.coming-soon-contact {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5rem;
+}
+
+.contact-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: color 0.2s ease;
+}
+
+.contact-link:hover {
+  color: #ffffff;
+}
+
+.coming-soon-socials {
+  display: flex;
+  gap: 1rem;
+}
+
+.coming-soon-socials a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+  transition: all 0.25s ease;
+}
+
+.coming-soon-socials a:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  transform: translateY(-2px);
+}
+
+.coming-soon-copyright {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* Animations */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .coming-soon-heading {
+    font-size: 2.25rem;
+  }
+  .coming-soon-timer {
+    gap: 0.35rem;
+  }
+  .timer-unit {
+    padding: 0.85rem 0.75rem;
+    min-width: 65px;
+    border-radius: 12px;
+  }
+  .timer-value {
+    font-size: 1.6rem;
+  }
+  .timer-colon {
+    font-size: 1.4rem;
+  }
+  .coming-soon-logo {
+    width: 140px;
+  }
+}

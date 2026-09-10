@@ -21,7 +21,7 @@ export default function AdminError({ error, reset }) {
         )}
         <div className="flex items-center justify-center gap-3">
           <Link
-            href="/"
+            href="/dashboard"
             className="inline-flex items-center gap-2 px-4 py-2 border border-gray-200 text-sm font-semibold rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
           >
             <ArrowLeft size={14} /> Dashboard

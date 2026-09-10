@@ -101,7 +101,7 @@ export async function verifyServerPageAccess(supabase, module, action = 'view') 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     const { redirect } = require("next/navigation");
-    redirect('/login');
+    redirect('/magtus-login');
   }
 
   const { data: profile } = await supabase
@@ -112,7 +112,7 @@ export async function verifyServerPageAccess(supabase, module, action = 'view') 
 
   if (!profile) {
     const { redirect } = require("next/navigation");
-    redirect('/login');
+    redirect('/magtus-login');
   }
 
   let orgMember = null;
@@ -128,7 +128,7 @@ export async function verifyServerPageAccess(supabase, module, action = 'view') 
 
   if (!hasModulePermission(profile, orgMember, module, action)) {
     const { redirect } = require("next/navigation");
-    redirect('/');
+    redirect('/dashboard');
   }
 
   return { profile, orgMember };

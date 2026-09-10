@@ -6,8 +6,8 @@ import { Toaster } from "react-hot-toast";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "Magtus Admin Dashboard",
-  description: "Minimal Admin Dashboard for Magtus Hardware",
+  title: "Magtus - Coming Soon",
+  description: "Magtus is coming soon. Stay tuned for something amazing!",
   icons: {
     icon: "/favicon.png",
   },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,13 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const router = useRouter();
   const supabase = createClient();
+  const phoneRef = useRef(null);
+  const otpRef = useRef(null);
+
+  useEffect(() => {
+    if (step === 1) phoneRef.current?.focus();
+    if (step === 2) otpRef.current?.focus();
+  }, [step]);
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
@@ -78,7 +85,7 @@ export default function LoginPage() {
         
         if (accessData?.allowed) {
           isSuccess = true;
-          router.push("/");
+          router.push("/dashboard");
           router.refresh();
           return;
         }
@@ -146,7 +153,7 @@ export default function LoginPage() {
       }
 
       isSuccess = true;
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     } catch (err) {
       setError(err.message || "Failed to verify invite code.");
@@ -187,6 +194,7 @@ export default function LoginPage() {
                     +91
                   </div>
                   <Input 
+                    ref={phoneRef}
                     id="phone" 
                     type="tel" 
                     placeholder="9876543210" 
@@ -211,6 +219,7 @@ export default function LoginPage() {
               <div className="space-y-2">
                 <Label htmlFor="otp">Verification Code</Label>
                 <Input 
+                  ref={otpRef}
                   id="otp" 
                   type="text" 
                   placeholder="000000" 

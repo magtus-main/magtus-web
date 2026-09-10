@@ -14,7 +14,7 @@ export default function NotFound() {
           The page you're looking for doesn't exist or has been moved.
         </p>
         <Link
-          href="/"
+          href="/dashboard"
           className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#4f3a30] text-white text-sm font-semibold rounded-lg hover:bg-[#4f3a30]/90 transition-colors"
         >
           <ArrowLeft size={14} /> Back to Dashboard

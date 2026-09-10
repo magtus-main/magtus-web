@@ -34,19 +34,20 @@ export const updateSession = async (request) => {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isAuthPage = request.nextUrl.pathname.startsWith('/login');
+  const isAuthPage = request.nextUrl.pathname.startsWith('/magtus-login');
+  const isPublicHome = request.nextUrl.pathname === '/';
   
-  // If not logged in and not on login page, redirect to login
-  if (!user && !isAuthPage) {
+  // If not logged in and not on login page or public home, redirect to login
+  if (!user && !isAuthPage && !isPublicHome) {
     const url = request.nextUrl.clone();
-    url.pathname = '/login';
+    url.pathname = '/magtus-login';
     return NextResponse.redirect(url);
   }
 
   // If logged in and on login page, redirect to dashboard
   if (user && isAuthPage) {
     const url = request.nextUrl.clone();
-    url.pathname = '/';
+    url.pathname = '/dashboard';
     return NextResponse.redirect(url);
   }
 

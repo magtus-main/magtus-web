@@ -9,7 +9,7 @@ export default async function AdminLayout({ children }) {
   
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
-    redirect('/login');
+    redirect('/magtus-login');
   }
 
   // Check admin portal authorization
@@ -17,7 +17,7 @@ export default async function AdminLayout({ children }) {
   if (accessError || !accessData?.allowed) {
     // Clear session & redirect
     await supabase.auth.signOut();
-    redirect('/login');
+    redirect('/magtus-login');
   }
   
   let profile = null;
