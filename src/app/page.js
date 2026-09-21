@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { Mail, Phone } from "lucide-react";
 
 // Set your launch date here (YYYY-MM-DD format)
-const LAUNCH_DATE = new Date("2027-12-01T00:00:00");
+const LAUNCH_DATE = new Date("2026-12-01T00:00:00");
 
 function getTimeLeft() {
   const now = new Date();
@@ -80,13 +81,13 @@ export default function ComingSoonPage() {
         {/* Footer */}
         <footer className="coming-soon-footer">
           <div className="coming-soon-contact">
-            <a href="mailto:info@magtus.com" className="contact-link">
+            <a href="mailto:info@magtus.co.in" className="contact-link">
               <Mail size={18} />
-              <span>info@magtus.com</span>
+              <span>info@magtus.co.in</span>
             </a>
-            <a href="tel:+919876543210" className="contact-link">
+            <a href="tel:+919327921602" className="contact-link">
               <Phone size={18} />
-              <span>+91 98765 43210</span>
+              <span>+91 93279 21602</span>
             </a>
           </div>
           <div className="coming-soon-socials">
@@ -105,6 +106,11 @@ export default function ComingSoonPage() {
             <a href="https://linkedin.com/company/magtus" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" /><rect width="4" height="12" x="2" y="9" /><circle cx="4" cy="4" r="2" /></svg>
             </a>
+          </div>
+          <div className="coming-soon-links">
+            <Link href="/privacy-policy" className="coming-soon-link">
+              Privacy Policy
+            </Link>
           </div>
           <p className="coming-soon-copyright">
             &copy; {new Date().getFullYear()} Magtus. All rights reserved.
