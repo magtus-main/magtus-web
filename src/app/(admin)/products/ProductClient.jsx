@@ -229,7 +229,12 @@ export default function ProductClient({ initialProducts, initialCategories, init
           finishImages: finishImages,
           priceMatrix: priceMatrix.map(m => ({
             ...m,
-            sku: `${baseSku}-${m.finish.replace(/\s+/g, '').toUpperCase()}-${m.size.replace(/\s+/g, '').toUpperCase()}`
+            mrp: parseFloat(m.mrp) || 0,
+            dealer_price: parseFloat(m.dealer_price) || 0,
+            reward_points: parseInt(m.reward_points) || 0,
+            stock: parseInt(m.stock) || 0,
+            min_stock: parseInt(m.min_stock) || 5,
+            sku: `${baseSku}-${(m.finish || '').replace(/\s+/g, '').toUpperCase()}-${(m.size || '').replace(/\s+/g, '').toUpperCase()}`
           })),
         },
       };

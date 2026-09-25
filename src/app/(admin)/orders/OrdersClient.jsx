@@ -301,7 +301,7 @@ export default function OrdersClient({ initialOrders, initialCount }) {
       toast.success(`Order ${newStatus === 'cancelled' ? 'cancelled' : 'updated to ' + newStatus}`);
     } catch (err) {
       console.error(err);
-      toast.error("Failed to update status");
+      toast.error(err.message || "Failed to update status");
     } finally {
       setLoading(false);
     }
