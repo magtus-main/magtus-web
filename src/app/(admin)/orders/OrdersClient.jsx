@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Ban,
   Upload,
+  Undo2 as UndoIcon,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { useLoader } from "@/components/providers/LoaderProvider";
@@ -247,14 +248,17 @@ export default function OrdersClient({ initialOrders, initialCount }) {
     try {
       setLoading(true);
 
-      // Strict flow validation: only allow forward transitions or cancel
+      // Strict flow validation: only allow forward transitions or cancel, OR revert from confirmed to pending
       const currentOrder = orders.find(o => o.id === orderId) || selectedOrder;
       const currentStatus = currentOrder?.status;
       if (currentStatus === "delivered" || currentStatus === "cancelled") {
         toast.error("Cannot change status of a completed or cancelled order");
         return;
       }
-      if (newStatus !== "cancelled") {
+
+      const isRevertToPending = currentStatus === "confirmed" && newStatus === "pending";
+
+      if (newStatus !== "cancelled" && !isRevertToPending) {
         const currentIdx = TIMELINE_STEPS.indexOf(currentStatus);
         const newIdx = TIMELINE_STEPS.indexOf(newStatus);
         if (newIdx <= currentIdx) {
@@ -298,7 +302,13 @@ export default function OrdersClient({ initialOrders, initialCount }) {
         setSelectedOrder((prev) => ({ ...prev, status: newStatus }));
       }
       setShowCancelConfirm(null);
-      toast.success(`Order ${newStatus === 'cancelled' ? 'cancelled' : 'updated to ' + newStatus}`);
+      toast.success(
+        newStatus === 'cancelled'
+          ? 'Order cancelled'
+          : newStatus === 'pending'
+          ? 'Order reverted to pending'
+          : `Order updated to ${newStatus}`
+      );
     } catch (err) {
       console.error(err);
       toast.error(err.message || "Failed to update status");
@@ -306,6 +316,8 @@ export default function OrdersClient({ initialOrders, initialCount }) {
       setLoading(false);
     }
   };
+
+  const handleUpdateStatus = handleStatusChange;
 
   const handleViewDetails = async (order) => {
     try {
@@ -509,6 +521,15 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                         </Button>
                       )}
                     </div>
+                  )}
+                  {selectedOrder.status === 'confirmed' && (
+                    <button
+                      onClick={() => handleUpdateStatus(selectedOrder.id, 'pending')}
+                      className="text-amber-600 hover:text-amber-800 text-sm font-medium flex items-center gap-1"
+                    >
+                      <UndoIcon className="w-4 h-4" />
+                      Unaccept
+                    </button>
                   )}
                   {nextAction && hasOrderStepPermission(
                     userProfile,
@@ -1023,14 +1044,25 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                         </span>
                       </TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleViewDetails(order)}
-                          className="text-gray-400 hover:text-primary text-[10px] font-bold tracking-wider"
-                        >
-                          <Eye size={14} className="mr-1" /> DETAILS
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          {order.status === 'confirmed' && (
+                            <button
+                              onClick={() => handleUpdateStatus(order.id, 'pending')}
+                              className="text-amber-600 hover:text-amber-800 text-sm font-medium flex items-center gap-1"
+                            >
+                              <UndoIcon className="w-4 h-4" />
+                              Unaccept
+                            </button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleViewDetails(order)}
+                            className="text-gray-400 hover:text-primary text-[10px] font-bold tracking-wider"
+                          >
+                            <Eye size={14} className="mr-1" /> DETAILS
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

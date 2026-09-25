@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Plus, Trash2, Languages, Image as ImageIcon, X, Save } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Plus, Trash2, Languages, Image as ImageIcon, X, Save, Percent } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,10 +18,55 @@ export default function ProductForm({
   priceMatrix, setPriceMatrix,
   onSave, onCancel, isLoading,
   handleTranslate,
+  defaultDpPercentage = 20,
 }) {
   const [activeSection, setActiveSection] = useState("details");
   const [activeFieldTab, setActiveFieldTab] = useState("size");
   const FIXED_FIELDS = ["size", "finish", "thickness"];
+
+  // Track if user manually modified DP to avoid unwanted overwrites
+  const [isDpManuallyEdited, setIsDpManuallyEdited] = useState(Boolean(editingProductId));
+
+  useEffect(() => {
+    setIsDpManuallyEdited(Boolean(editingProductId));
+  }, [editingProductId]);
+
+  // Helper to calculate DP from MRP based on percentage
+  const calculateDp = (mrpVal, percent = defaultDpPercentage) => {
+    const numMrp = parseFloat(mrpVal);
+    const numPct = parseFloat(percent);
+    if (isNaN(numMrp) || isNaN(numPct) || numMrp <= 0) return "";
+    const dp = Math.round(numMrp * (1 - numPct / 100) * 100) / 100;
+    return dp.toString();
+  };
+
+  // Main product MRP change handler
+  const handleMrpChange = (newMrp) => {
+    const updated = { ...productForm, mrp: newMrp };
+    // If DP hasn't been manually typed by admin or is currently empty, auto-calculate DP
+    if (!isDpManuallyEdited || !productForm.dealer_price) {
+      if (newMrp) {
+        updated.dealer_price = calculateDp(newMrp);
+      } else {
+        updated.dealer_price = "";
+      }
+    }
+    setProductForm(updated);
+  };
+
+  // Main product DP change handler
+  const handleDpChange = (newDp) => {
+    setIsDpManuallyEdited(true);
+    setProductForm({ ...productForm, dealer_price: newDp });
+  };
+
+  // One-click apply / recalculate auto DP
+  const handleApplyAutoDp = () => {
+    if (!productForm.mrp || parseFloat(productForm.mrp) <= 0) return;
+    const autoDp = calculateDp(productForm.mrp);
+    setProductForm({ ...productForm, dealer_price: autoDp });
+    setIsDpManuallyEdited(false);
+  };
 
   // --- Custom field helpers (fixed fields: size, finish, thickness) ---
   const addValueToField = (key, val) => {
@@ -47,11 +92,47 @@ export default function ProductForm({
     const idx = priceMatrix.findIndex(m => m[rowKey] === row && m[colKey] === col);
     if (idx >= 0) {
       const updated = [...priceMatrix];
-      updated[idx] = { ...updated[idx], [field]: value };
+      const currentCell = { ...updated[idx], [field]: value };
+
+      // Auto-calculate DP if MRP is entered and DP is empty or was previously auto-calculated
+      if (field === "mrp") {
+        if (!currentCell.dealer_price || currentCell._dpAuto) {
+          if (value && parseFloat(value) > 0) {
+            currentCell.dealer_price = calculateDp(value);
+            currentCell._dpAuto = true;
+          } else if (!value) {
+            currentCell.dealer_price = "";
+          }
+        }
+      } else if (field === "dealer_price") {
+        currentCell._dpAuto = false;
+      }
+
+      updated[idx] = currentCell;
       setPriceMatrix(updated);
     } else {
-      setPriceMatrix([...priceMatrix, { [rowKey]: row, [colKey]: col, [field]: value }]);
+      const newCell = { [rowKey]: row, [colKey]: col, [field]: value };
+      if (field === "mrp" && value && parseFloat(value) > 0) {
+        newCell.dealer_price = calculateDp(value);
+        newCell._dpAuto = true;
+      }
+      setPriceMatrix([...priceMatrix, newCell]);
     }
+  };
+
+  const handleAutoCalcAllMatrixDp = () => {
+    if (priceMatrix.length === 0) return;
+    const updated = priceMatrix.map(cell => {
+      if (cell.mrp && parseFloat(cell.mrp) > 0) {
+        return {
+          ...cell,
+          dealer_price: calculateDp(cell.mrp),
+          _dpAuto: true,
+        };
+      }
+      return cell;
+    });
+    setPriceMatrix(updated);
   };
 
   const generateEmptyMatrix = () => {
@@ -147,12 +228,56 @@ export default function ProductForm({
                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Pricing & Points</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="text-sm font-semibold text-gray-700">MRP (₹)</Label>
-                    <Input type="number" placeholder="0" value={productForm.mrp} onChange={(e) => setProductForm({ ...productForm, mrp: e.target.value })} className="bg-gray-50" />
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-semibold text-gray-700">MRP (₹)</Label>
+                      {defaultDpPercentage > 0 && (
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          Auto DP: {defaultDpPercentage}% off
+                        </span>
+                      )}
+                    </div>
+                    <Input
+                      type="number"
+                      placeholder="0"
+                      value={productForm.mrp}
+                      onChange={(e) => handleMrpChange(e.target.value)}
+                      className="bg-gray-50 focus-visible:bg-white"
+                    />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-sm font-semibold text-gray-700">Dealer Price (₹)</Label>
-                    <Input type="number" placeholder="0" value={productForm.dealer_price} onChange={(e) => setProductForm({ ...productForm, dealer_price: e.target.value })} className="bg-gray-50" />
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-semibold text-gray-700">Dealer Price (₹)</Label>
+                      {productForm.mrp && parseFloat(productForm.mrp) > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleApplyAutoDp}
+                          title={`Recalculate with ${defaultDpPercentage}% discount`}
+                          className="text-[10px] text-primary hover:text-primary/80 font-semibold flex items-center gap-0.5 hover:underline"
+                        >
+                          <Percent size={10} /> Auto ({defaultDpPercentage}%)
+                        </button>
+                      )}
+                    </div>
+                    <Input
+                      type="number"
+                      placeholder="0"
+                      value={productForm.dealer_price}
+                      onChange={(e) => handleDpChange(e.target.value)}
+                      className="bg-gray-50 focus-visible:bg-white"
+                    />
+                    {productForm.mrp && productForm.dealer_price && (
+                      <div className="flex items-center justify-between text-[11px] px-0.5 text-gray-500">
+                        {!isDpManuallyEdited ? (
+                          <span className="text-emerald-600 font-medium flex items-center gap-1">
+                            ✓ Auto {defaultDpPercentage}% applied (-₹{(parseFloat(productForm.mrp) - parseFloat(productForm.dealer_price)).toFixed(2)})
+                          </span>
+                        ) : (
+                          <span className="text-amber-600 font-medium">
+                            Custom DP ({((1 - parseFloat(productForm.dealer_price) / parseFloat(productForm.mrp)) * 100).toFixed(1)}% margin)
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-sm font-semibold text-gray-700">Reward Points</Label>
@@ -268,13 +393,28 @@ export default function ProductForm({
                 <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50 flex-shrink-0">
                   <div>
                     <h3 className="text-sm font-bold text-gray-900">Price Matrix</h3>
-                    <p className="text-[11px] text-gray-500">Finish (rows) × Size (columns)</p>
+                    <p className="text-[11px] text-gray-500">Finish (rows) × Size (columns) • DP auto-calculates at {defaultDpPercentage}% off MRP</p>
                   </div>
-                  {colValues.length > 0 && rowValues.length > 0 && (
-                    <Button size="sm" onClick={generateEmptyMatrix} className="bg-primary text-white text-xs h-8">
-                      Generate Matrix
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {priceMatrix.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAutoCalcAllMatrixDp}
+                        className="text-xs h-8 text-primary border-primary/30 hover:bg-primary/5"
+                        title={`Apply ${defaultDpPercentage}% DP discount across all matrix variants`}
+                      >
+                        <Percent size={12} className="mr-1" />
+                        Apply {defaultDpPercentage}% DP to All
+                      </Button>
+                    )}
+                    {colValues.length > 0 && rowValues.length > 0 && (
+                      <Button size="sm" onClick={generateEmptyMatrix} className="bg-primary text-white text-xs h-8">
+                        Generate Matrix
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-auto p-4">

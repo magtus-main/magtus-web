@@ -11,6 +11,8 @@ import {
   Star,
   Gift,
   QrCode,
+  Percent,
+  Calculator,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { useLoader } from "@/components/providers/LoaderProvider";
@@ -40,6 +42,15 @@ export default function SettingsClient({ initialSettings }) {
   const [supportPhone, setSupportPhone] = useState(getSetting("support_phone", ""));
   const [currency, setCurrency] = useState(getSetting("currency", "INR"));
   const [timezone, setTimezone] = useState(getSetting("timezone", "Asia/Kolkata"));
+
+  // Pricing & DP Settings
+  const [defaultDpPercentage, setDefaultDpPercentage] = useState(
+    getSetting("default_dp_percentage", "20")
+  );
+  const [taxPercentage, setTaxPercentage] = useState(
+    getSetting("tax_percentage", "18")
+  );
+  const [testMrp, setTestMrp] = useState("100");
 
   // Rewards Policy (these match existing DB keys)
   const [dealerPointsPerRupee, setDealerPointsPerRupee] = useState(
@@ -89,6 +100,22 @@ export default function SettingsClient({ initialSettings }) {
     }
   };
 
+  const handleSavePricing = async () => {
+    try {
+      setLoading(true);
+      await upsertSettings([
+        ["default_dp_percentage", parseFloat(defaultDpPercentage) || 0],
+        ["tax_percentage", parseFloat(taxPercentage) || 0],
+      ]);
+      toast.success("Pricing & DP settings saved!");
+    } catch (err) {
+      console.error(err);
+      toast.error(err.message || "Failed to save settings");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveRewards = async () => {
     try {
       setLoading(true);
@@ -109,6 +136,7 @@ export default function SettingsClient({ initialSettings }) {
 
   const navItems = [
     { id: "company", icon: Building, label: "Company Info" },
+    { id: "pricing", icon: Percent, label: "Pricing & DP" },
     { id: "rewards", icon: Star, label: "Rewards Policy" },
     { id: "notifications", icon: Bell, label: "Notifications" },
     { id: "preferences", icon: Settings2, label: "Preferences" },
@@ -126,6 +154,16 @@ export default function SettingsClient({ initialSettings }) {
           }`}
         >
           General
+        </button>
+        <button
+          onClick={() => setActiveSection("pricing")}
+          className={`h-full flex items-center border-b-2 transition-colors ${
+            activeSection === "pricing"
+              ? "border-primary text-primary font-semibold"
+              : "border-transparent text-gray-500 hover:text-primary hover:border-primary/30"
+          }`}
+        >
+          Pricing & DP
         </button>
         <button
           onClick={() => setActiveSection("rewards")}
@@ -224,6 +262,123 @@ export default function SettingsClient({ initialSettings }) {
                             <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
                             <option value="UTC">UTC</option>
                           </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Pricing & DP Section */}
+              {activeSection === "pricing" && (
+                <div>
+                  <div className="mb-8">
+                    <h2 className="text-lg font-bold text-gray-900">Pricing & DP Calculation Settings</h2>
+                    <p className="text-sm text-gray-500 mt-1">Configure automated price calculation rules to streamline product creation.</p>
+                  </div>
+                  <div className="space-y-6">
+                    <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-4 flex items-start gap-3">
+                      <Percent className="text-emerald-600 mt-0.5 shrink-0" size={18} />
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-900 mb-0.5">Automated Dealer Price (DP) Calculation</p>
+                        <p className="text-xs text-emerald-700 leading-relaxed">
+                          When creating a product or adding matrix variants, the system will automatically calculate the Dealer Price (DP) on first entry of MRP: <strong>DP = MRP - (MRP × {defaultDpPercentage || 0}%)</strong>. Admins can still freely change or fine-tune the DP as needed.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Configuration Card */}
+                      <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-5">
+                        <div className="flex items-center gap-2 text-primary">
+                          <Percent size={18} />
+                          <h3 className="font-bold text-sm">Default Margin / Discount</h3>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Default DP Discount from MRP (%)</Label>
+                          <div className="relative">
+                            <Input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.5"
+                              value={defaultDpPercentage}
+                              onChange={(e) => setDefaultDpPercentage(e.target.value)}
+                              className="bg-gray-50 focus-visible:bg-white pr-10 text-base font-semibold"
+                              placeholder="20"
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">%</span>
+                          </div>
+                          <p className="text-[11px] text-gray-500">
+                            e.g. 20% means on MRP ₹100, the Dealer Price auto-fills as ₹80
+                          </p>
+                        </div>
+
+                        <div className="pt-4 border-t border-gray-100 space-y-2">
+                          <Label className="text-xs font-bold text-gray-700 uppercase tracking-wider">GST Tax Rate (%)</Label>
+                          <div className="relative">
+                            <Input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={taxPercentage}
+                              onChange={(e) => setTaxPercentage(e.target.value)}
+                              className="bg-gray-50 focus-visible:bg-white pr-10"
+                              placeholder="18"
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">%</span>
+                          </div>
+                          <p className="text-[11px] text-gray-400">Applicable GST percentage across orders</p>
+                        </div>
+                      </div>
+
+                      {/* Live Interactive Preview Card */}
+                      <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-4 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 text-primary mb-3">
+                            <Calculator size={18} />
+                            <h3 className="font-bold text-sm">Live Calculation Simulator</h3>
+                          </div>
+                          <p className="text-xs text-gray-500 mb-4">
+                            See how this discount rate behaves in real-time when typing MRP:
+                          </p>
+
+                          <div className="space-y-3">
+                            <div>
+                              <Label className="text-xs font-semibold text-gray-600 mb-1 block">Test MRP (₹)</Label>
+                              <Input
+                                type="number"
+                                value={testMrp}
+                                onChange={(e) => setTestMrp(e.target.value)}
+                                placeholder="100"
+                                className="bg-gray-50 h-9 text-sm font-medium"
+                              />
+                            </div>
+
+                            <div className="bg-gray-50 p-3.5 rounded-lg border border-gray-200 space-y-2 text-xs">
+                              <div className="flex justify-between text-gray-600">
+                                <span>Entered MRP:</span>
+                                <span className="font-semibold text-gray-900">₹{parseFloat(testMrp) || 0}</span>
+                              </div>
+                              <div className="flex justify-between text-gray-600">
+                                <span>Discount ({defaultDpPercentage || 0}%):</span>
+                                <span className="font-semibold text-red-600">
+                                  -₹{((parseFloat(testMrp) || 0) * (parseFloat(defaultDpPercentage) || 0) / 100).toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="pt-2 border-t border-gray-200 flex justify-between items-center">
+                                <span className="font-bold text-gray-900">Auto-filled DP:</span>
+                                <span className="font-bold text-base text-primary">
+                                  ₹{(Math.max(0, (parseFloat(testMrp) || 0) * (1 - (parseFloat(defaultDpPercentage) || 0) / 100))).toFixed(2)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-[11px] text-amber-900">
+                          💡 <strong>Time Saver:</strong> Admin only enters MRP, and DP is immediately auto-filled. If a specific product requires custom pricing, the admin can simply edit the DP box.
                         </div>
                       </div>
                     </div>
@@ -385,7 +540,13 @@ export default function SettingsClient({ initialSettings }) {
           {/* Save Footer */}
           <div className="border-t border-gray-200 p-4 flex justify-end bg-gray-50/50 flex-shrink-0">
             <Button
-              onClick={activeSection === "rewards" ? handleSaveRewards : handleSaveCompany}
+              onClick={
+                activeSection === "pricing"
+                  ? handleSavePricing
+                  : activeSection === "rewards"
+                  ? handleSaveRewards
+                  : handleSaveCompany
+              }
               className="bg-primary hover:bg-primary/90 text-white text-xs font-semibold tracking-wider"
               disabled={isLoading}
             >

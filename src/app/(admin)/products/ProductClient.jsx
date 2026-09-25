@@ -27,7 +27,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import ProductForm from "./ProductForm";
 import { hasModulePermission } from "@/utils/permissions";
 
-export default function ProductClient({ initialProducts, initialCategories, initialSubcategories, profile, orgMember }) {
+export default function ProductClient({ initialProducts, initialCategories, initialSubcategories, profile, orgMember, defaultDpPercentage = 20 }) {
   const hasEditPermission = hasModulePermission(profile, orgMember, "products", "edit");
   const [activeTab, setActiveTab] = useState("all-products");
 
@@ -227,15 +227,18 @@ export default function ProductClient({ initialProducts, initialCategories, init
         specifications: {
           customFields: customFields,
           finishImages: finishImages,
-          priceMatrix: priceMatrix.map(m => ({
-            ...m,
-            mrp: parseFloat(m.mrp) || 0,
-            dealer_price: parseFloat(m.dealer_price) || 0,
-            reward_points: parseInt(m.reward_points) || 0,
-            stock: parseInt(m.stock) || 0,
-            min_stock: parseInt(m.min_stock) || 5,
-            sku: `${baseSku}-${(m.finish || '').replace(/\s+/g, '').toUpperCase()}-${(m.size || '').replace(/\s+/g, '').toUpperCase()}`
-          })),
+          priceMatrix: priceMatrix.map(m => {
+            const { _dpAuto, ...cleanM } = m;
+            return {
+              ...cleanM,
+              mrp: parseFloat(m.mrp) || 0,
+              dealer_price: parseFloat(m.dealer_price) || 0,
+              reward_points: parseInt(m.reward_points) || 0,
+              stock: parseInt(m.stock) || 0,
+              min_stock: parseInt(m.min_stock) || 5,
+              sku: `${baseSku}-${(m.finish || '').replace(/\s+/g, '').toUpperCase()}-${(m.size || '').replace(/\s+/g, '').toUpperCase()}`
+            };
+          }),
         },
       };
 
@@ -702,6 +705,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
               onCancel={handleCancelEdit}
               isLoading={isLoading}
               handleTranslate={handleTranslate}
+              defaultDpPercentage={defaultDpPercentage}
             />
           </TabsContent>
 

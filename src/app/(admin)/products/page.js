@@ -34,6 +34,24 @@ export default async function ProductsPage() {
     .select('*, categories (id, name)')
     .order('name');
 
+  // Fetch app settings (for default DP percentage calculation)
+  const { data: settingsRows } = await supabase
+    .from('app_settings')
+    .select('key, value');
+
+  const settingsMap = {};
+  if (settingsRows) {
+    for (const row of settingsRows) {
+      try {
+        settingsMap[row.key] = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+      } catch {
+        settingsMap[row.key] = row.value;
+      }
+    }
+  }
+
+  const defaultDpPercentage = parseFloat(settingsMap.default_dp_percentage) || 20;
+
   return (
     <ProductClient
       initialProducts={products || []}
@@ -41,6 +59,7 @@ export default async function ProductsPage() {
       initialSubcategories={subcategories || []}
       profile={profile}
       orgMember={orgMember}
+      defaultDpPercentage={defaultDpPercentage}
     />
   );
 }
