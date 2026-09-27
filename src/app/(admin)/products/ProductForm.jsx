@@ -19,6 +19,7 @@ export default function ProductForm({
   onSave, onCancel, isLoading,
   handleTranslate,
   defaultDpPercentage = 20,
+  defaultGstPercentage = 18,
 }) {
   const [activeSection, setActiveSection] = useState("details");
   const [activeFieldTab, setActiveFieldTab] = useState("size");
@@ -278,6 +279,43 @@ export default function ProductForm({
                         )}
                       </div>
                     )}
+                  </div>
+
+                  {/* GST (%) Input Box */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-semibold text-gray-700">GST Rate (%)</Label>
+                      {defaultGstPercentage !== undefined && (
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          Settings: {defaultGstPercentage}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        placeholder={defaultGstPercentage?.toString() || "18"}
+                        value={productForm.gst_percentage !== undefined ? productForm.gst_percentage : defaultGstPercentage}
+                        onChange={(e) => setProductForm({ ...productForm, gst_percentage: e.target.value })}
+                        className="bg-gray-50 focus-visible:bg-white pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">%</span>
+                    </div>
+                  </div>
+
+                  {/* HSN Code Input Box */}
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-semibold text-gray-700">HSN Code</Label>
+                    <Input
+                      type="text"
+                      placeholder="e.g. 8302"
+                      value={productForm.hsn_code || ""}
+                      onChange={(e) => setProductForm({ ...productForm, hsn_code: e.target.value.toUpperCase() })}
+                      className="bg-gray-50 focus-visible:bg-white"
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-sm font-semibold text-gray-700">Reward Points</Label>

@@ -27,7 +27,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import ProductForm from "./ProductForm";
 import { hasModulePermission } from "@/utils/permissions";
 
-export default function ProductClient({ initialProducts, initialCategories, initialSubcategories, profile, orgMember, defaultDpPercentage = 20 }) {
+export default function ProductClient({ initialProducts, initialCategories, initialSubcategories, profile, orgMember, defaultDpPercentage = 20, defaultGstPercentage = 18 }) {
   const hasEditPermission = hasModulePermission(profile, orgMember, "products", "edit");
   const [activeTab, setActiveTab] = useState("all-products");
 
@@ -67,6 +67,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
     is_active: true,
     is_featured: false,
     min_stock_level: "5",
+    gst_percentage: defaultGstPercentage.toString(),
+    hsn_code: "",
   });
 
   const [productImages, setProductImages] = useState([]); // { file: File, url: string, isExisting: boolean, id?: string, is_primary?: boolean }
@@ -126,6 +128,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
       is_active: product.is_active ?? true,
       is_featured: product.is_featured ?? false,
       min_stock_level: product.min_stock_level?.toString() || "5",
+      gst_percentage: (product.specifications?.gst_percentage ?? product.specifications?.tax_percentage ?? defaultGstPercentage)?.toString() || "18",
+      hsn_code: product.specifications?.hsn_code || product.specifications?.hsn || "",
     });
 
     // Load existing images
@@ -152,7 +156,9 @@ export default function ProductClient({ initialProducts, initialCategories, init
     setProductForm({
       name: "", name_hi: "", category_id: "", subcategory_id: "", mrp: "", dealer_price: "",
       reward_points: "", sku: "", unit: "piece", description: "",
-      description_hi: "", is_active: true, is_featured: false, min_stock_level: "5"
+      description_hi: "", is_active: true, is_featured: false, min_stock_level: "5",
+      gst_percentage: defaultGstPercentage.toString(),
+      hsn_code: "",
     });
     setProductImages([]);
     setCustomFields({});
@@ -227,6 +233,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
         specifications: {
           customFields: customFields,
           finishImages: finishImages,
+          gst_percentage: parseFloat(productForm.gst_percentage) || 0,
+          hsn_code: (productForm.hsn_code || "").trim(),
           priceMatrix: priceMatrix.map(m => {
             const { _dpAuto, ...cleanM } = m;
             return {
@@ -475,7 +483,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
   const filteredProducts = products
     .filter(p => {
       const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.categories?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+        p.categories?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.specifications?.hsn_code && p.specifications.hsn_code.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchCategory = !filterCategory || p.category_id === filterCategory;
       const matchStatus = !filterStatus || (filterStatus === 'active' ? p.is_active : !p.is_active);
       return matchSearch && matchCategory && matchStatus;
@@ -648,6 +657,13 @@ export default function ProductClient({ initialProducts, initialCategories, init
                         <TableCell>
                           <p className="font-semibold text-primary">₹{dealerPrice || 0}</p>
                           <p className="text-xs text-gray-500 line-through">₹{mrp || 0}</p>
+                          {(item.specifications?.hsn_code || item.specifications?.gst_percentage !== undefined) && (
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              {item.specifications?.hsn_code ? `HSN: ${item.specifications.hsn_code}` : ''}
+                              {item.specifications?.hsn_code && item.specifications?.gst_percentage !== undefined ? ' • ' : ''}
+                              {item.specifications?.gst_percentage !== undefined ? `GST: ${item.specifications.gst_percentage}%` : ''}
+                            </p>
+                          )}
                         </TableCell>
                         <TableCell>
                           <span className="text-sm font-medium text-gray-600 capitalize">{item.unit || "Piece"}</span>
@@ -706,6 +722,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
               isLoading={isLoading}
               handleTranslate={handleTranslate}
               defaultDpPercentage={defaultDpPercentage}
+              defaultGstPercentage={defaultGstPercentage}
             />
           </TabsContent>
 

@@ -51,6 +51,7 @@ export default async function ProductsPage() {
   }
 
   const defaultDpPercentage = parseFloat(settingsMap.default_dp_percentage) || 20;
+  const defaultGstPercentage = parseFloat(settingsMap.tax_percentage ?? settingsMap.gst_percentage) || 18;
 
   return (
     <ProductClient
@@ -60,6 +61,7 @@ export default async function ProductsPage() {
       profile={profile}
       orgMember={orgMember}
       defaultDpPercentage={defaultDpPercentage}
+      defaultGstPercentage={defaultGstPercentage}
     />
   );
 }
