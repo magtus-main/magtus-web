@@ -1,4 +1,5 @@
 import { Users, ShoppingBag, CreditCard, Activity, TrendingUp, Package, QrCode, ArrowUpRight, Gift, Megaphone, Star } from "lucide-react";
+import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import { cookies } from "next/headers";
 import PageHeader from "@/components/layout/PageHeader";
@@ -82,7 +83,7 @@ export default async function Dashboard() {
     <>
       <PageHeader
         title="Dashboard"
-        tabs={[{ label: "Stats & Analytics", href: "/" }]}
+        tabs={[{ label: "Stats & Analytics", href: "/dashboard" }]}
       />
       <div className="p-6 space-y-6 flex-1 overflow-auto">
 
@@ -115,23 +116,28 @@ export default async function Dashboard() {
           <div className="bg-white rounded-lg border border-gray-200 flex flex-col shadow-sm">
             <div className="p-5 border-b border-gray-200 flex justify-between items-center">
               <h2 className="font-bold text-sm tracking-wide text-gray-900">Recent Orders</h2>
-              <button className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:text-black flex items-center gap-1">
+              <Link href="/orders" className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hover:text-black flex items-center gap-1 transition-colors">
                 View All <ArrowUpRight size={14} />
-              </button>
+              </Link>
             </div>
             <div className="flex-1 p-5 overflow-auto">
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {recentOrders.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-4">No recent orders found.</p>
                 ) : (
                   recentOrders.map((order) => (
-                    <div key={order.id} className="flex items-center justify-between pb-4 border-b border-gray-100 last:border-0 last:pb-0">
+                    <Link
+                      key={order.id}
+                      href={`/orders?id=${order.id}`}
+                      prefetch={true}
+                      className="flex items-center justify-between p-3 -mx-2 rounded-lg border-b border-gray-100 last:border-0 hover:bg-gray-50/80 transition-colors group cursor-pointer"
+                    >
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-gray-50 rounded border border-gray-100 flex items-center justify-center">
-                          <Package size={18} className="text-gray-400" />
+                        <div className="w-10 h-10 bg-gray-50 group-hover:bg-primary/10 rounded border border-gray-100 flex items-center justify-center transition-colors">
+                          <Package size={18} className="text-gray-400 group-hover:text-primary transition-colors" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">{order.order_number}</p>
+                          <p className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors">{order.order_number}</p>
                           <p className="text-xs text-gray-400 mt-0.5">{order.dealer?.full_name || '—'}</p>
                         </div>
                       </div>
@@ -140,11 +146,11 @@ export default async function Dashboard() {
                         <span className={`text-[10px] font-bold tracking-wider px-2 py-0.5 rounded mt-1 inline-block uppercase
                         ${order.status === 'pending' ? 'text-yellow-600 bg-yellow-50' :
                             order.status === 'confirmed' ? 'text-blue-600 bg-blue-50' :
-                              'text-gray-600 bg-gray-50'}`}>
+                                'text-gray-600 bg-gray-50'}`}>
                           {order.status}
                         </span>
                       </div>
-                    </div>
+                    </Link>
                   ))
                 )}
               </div>

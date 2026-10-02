@@ -23,8 +23,10 @@ import {
   Ban,
   Upload,
   Undo2 as UndoIcon,
+  Printer,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { generateOrderPdf } from "@/utils/orderPdfGenerator";
 import { useLoader } from "@/components/providers/LoaderProvider";
 import { toast } from "react-hot-toast";
 import { hasOrderStepPermission } from "@/utils/permissions";
@@ -53,6 +55,9 @@ const STATUS_OPTIONS = [
 
 const TIMELINE_STEPS = ["pending", "confirmed", "shipped", "delivered"];
 
+// Order can be printed once it has reached shipped status (or delivered)
+const canPrintOrder = (status) => status === "shipped" || status === "delivered";
+
 // Map current status → next forward action
 const NEXT_ACTION = {
   pending: { next: "confirmed", label: "Accept", icon: ShieldCheck, className: "bg-blue-600 hover:bg-blue-700 text-white" },
@@ -62,14 +67,16 @@ const NEXT_ACTION = {
 
 const PAGE_SIZE = 15;
 
-export default function OrdersClient({ initialOrders, initialCount }) {
+export default function OrdersClient({ initialOrders, initialCount, initialSelectedOrder = null }) {
   const [orders, setOrders] = useState(initialOrders || []);
   const [totalCount, setTotalCount] = useState(initialCount || 0);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(initialSelectedOrder || null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(null);
+  const [printingOrderId, setPrintingOrderId] = useState(null);
+  const [loadingDetailsId, setLoadingDetailsId] = useState(null);
 
   // Delivery proof states
   const [showDeliveryModal, setShowDeliveryModal] = useState(null);
@@ -244,6 +251,36 @@ export default function OrdersClient({ initialOrders, initialCount }) {
     fetchOrders();
   }, [fetchOrders]);
 
+  useEffect(() => {
+    if (initialSelectedOrder) {
+      setSelectedOrder(initialSelectedOrder);
+    }
+  }, [initialSelectedOrder]);
+
+  const handleBackToOrders = () => {
+    setSelectedOrder(null);
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", "/orders");
+    }
+  };
+
+  // Sync with browser back/forward or query param changes
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const orderIdParam = params.get("id") || params.get("orderId");
+        if (!orderIdParam) {
+          setSelectedOrder(null);
+        } else if (!selectedOrder || selectedOrder.id !== orderIdParam) {
+          handleViewDetails({ id: orderIdParam });
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [selectedOrder]);
+
   const handleStatusChange = async (orderId, newStatus) => {
     try {
       setLoading(true);
@@ -321,7 +358,7 @@ export default function OrdersClient({ initialOrders, initialCount }) {
 
   const handleViewDetails = async (order) => {
     try {
-      setLoading(true);
+      setLoadingDetailsId(order.id);
       const { data, error } = await supabase
         .from("orders")
         .select(
@@ -338,11 +375,49 @@ export default function OrdersClient({ initialOrders, initialCount }) {
 
       if (error) throw error;
       setSelectedOrder(data);
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", `/orders?id=${order.id}`);
+      }
     } catch (err) {
       console.error(err);
       toast.error("Failed to load order details");
     } finally {
-      setLoading(false);
+      setLoadingDetailsId(null);
+    }
+  };
+
+  const handlePrintOrder = async (order) => {
+    try {
+      setPrintingOrderId(order.id);
+      let fullOrder = order;
+
+      // If order_items are not yet fetched (e.g. when triggered from the orders list table)
+      if (!order.order_items || order.order_items.length === 0) {
+        const { data, error } = await supabase
+          .from("orders")
+          .select(
+            `*, 
+            dealer:profiles!dealer_id(id, full_name, phone),
+            organization:organizations!organization_id(id, name, city, state, address),
+            order_items(
+              id, quantity, unit_price, total_price, product_name, variant_details,
+              product:products(id, name, name_hi)
+            )`
+          )
+          .eq("id", order.id)
+          .single();
+
+        if (error) throw error;
+        fullOrder = data;
+      }
+
+      await generateOrderPdf(fullOrder);
+      toast.success("Order PDF ready for print!");
+    } catch (err) {
+      console.error("Failed to generate order PDF:", err);
+      toast.error(err.message || "Failed to generate order PDF");
+    } finally {
+      setPrintingOrderId(null);
     }
   };
 
@@ -401,7 +476,7 @@ export default function OrdersClient({ initialOrders, initialCount }) {
       <div className="flex flex-col h-full overflow-hidden bg-gray-50">
         <PageHeader title="Orders">
           <button
-            onClick={() => setSelectedOrder(null)}
+            onClick={handleBackToOrders}
             className="h-full flex items-center border-b-2 border-primary text-primary font-semibold"
           >
             Order Details
@@ -413,12 +488,23 @@ export default function OrdersClient({ initialOrders, initialCount }) {
             {/* Header Row */}
             <div className="flex items-center justify-between">
               <button
-                onClick={() => setSelectedOrder(null)}
+                onClick={handleBackToOrders}
                 className="flex items-center gap-2 text-sm text-gray-500 hover:text-primary transition-colors font-medium"
               >
                 <ArrowLeft size={16} /> Back to Orders
               </button>
               <div className="flex items-center gap-3">
+                {canPrintOrder(selectedOrder.status) && (
+                  <Button
+                    size="sm"
+                    onClick={() => handlePrintOrder(selectedOrder)}
+                    disabled={printingOrderId === selectedOrder.id}
+                    className="bg-primary hover:bg-primary/90 text-white text-xs font-bold tracking-wider flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Printer size={14} className={printingOrderId === selectedOrder.id ? "animate-pulse" : ""} />
+                    {printingOrderId === selectedOrder.id ? "GENERATING PDF..." : "PRINT ORDER"}
+                  </Button>
+                )}
                 <span
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold tracking-wider uppercase ${statusConfig.color}`}
                 >
@@ -1045,6 +1131,19 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                       </TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-2">
+                          {canPrintOrder(order.status) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePrintOrder(order)}
+                              disabled={printingOrderId === order.id}
+                              className="text-primary hover:bg-primary/10 border-primary/30 text-[10px] font-bold tracking-wider h-8 px-2.5 flex items-center gap-1"
+                              title="Print Order / Delivery Slip"
+                            >
+                              <Printer size={13} className={printingOrderId === order.id ? "animate-pulse" : ""} />
+                              {printingOrderId === order.id ? "PRINTING..." : "PRINT"}
+                            </Button>
+                          )}
                           {order.status === 'confirmed' && (
                             <button
                               onClick={() => handleUpdateStatus(order.id, 'pending')}
@@ -1058,9 +1157,11 @@ export default function OrdersClient({ initialOrders, initialCount }) {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleViewDetails(order)}
+                            disabled={loadingDetailsId === order.id}
                             className="text-gray-400 hover:text-primary text-[10px] font-bold tracking-wider"
                           >
-                            <Eye size={14} className="mr-1" /> DETAILS
+                            <Eye size={14} className={`mr-1 ${loadingDetailsId === order.id ? "animate-spin" : ""}`} />
+                            {loadingDetailsId === order.id ? "OPENING..." : "DETAILS"}
                           </Button>
                         </div>
                       </TableCell>

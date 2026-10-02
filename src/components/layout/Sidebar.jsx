@@ -3,7 +3,7 @@ import { LayoutDashboard, Package, ShoppingCart, Settings, Users, Image as Image
 
 export default function Sidebar() {
   const navItems = [
-    { icon: LayoutDashboard, label: "Dashboard", href: "/" },
+    { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
     { icon: Package, label: "Products", href: "/products" },
     { icon: ShoppingCart, label: "Orders", href: "/orders" },
     { icon: Users, label: "Users", href: "/users" },
@@ -27,6 +27,7 @@ export default function Sidebar() {
             <Link 
               key={index} 
               href={item.href}
+              prefetch={true}
               className="text-gray-400 hover:text-black transition-colors p-2 rounded-lg hover:bg-gray-50"
               title={item.label}
             >

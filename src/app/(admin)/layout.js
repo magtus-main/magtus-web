@@ -1,4 +1,5 @@
 import TopNav from "@/components/layout/TopNav";
+import NavigationProgressBar from "@/components/layout/NavigationProgressBar";
 import { createClient } from "@/utils/supabase/server";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -41,6 +42,7 @@ export default async function AdminLayout({ children }) {
 
   return (
     <div className="flex h-screen overflow-hidden w-full bg-gray-50">
+      <NavigationProgressBar />
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Navigation */}
         <TopNav profile={profile} orgMember={orgMember} />

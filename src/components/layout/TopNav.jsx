@@ -96,7 +96,7 @@ export default function TopNav({ profile, orgMember }) {
   };
 
   const allNavItems = [
-    { label: "Dashboard", href: "/", show: true },
+    { label: "Dashboard", href: "/dashboard", show: true },
     { label: "Products", href: "/products", show: hasModulePermission(profile, orgMember, "products", "view") },
     { label: "Orders", href: "/orders", show: hasModulePermission(profile, orgMember, "orders", "view") },
     { label: "Users", href: "/users", show: hasModulePermission(profile, orgMember, "users", "view") },
@@ -116,7 +116,7 @@ export default function TopNav({ profile, orgMember }) {
   return (
     <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0">
       <div className="flex items-center gap-8">
-        <div className="flex items-center gap-2">
+        <Link href="/dashboard" className="flex items-center gap-2 hover:opacity-90 transition-opacity">
           <Image
             src="/magtus_logo.png"
             alt="Magtus Logo"
@@ -126,7 +126,7 @@ export default function TopNav({ profile, orgMember }) {
             className="object-contain"
             priority
           />
-        </div>
+        </Link>
 
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-gray-500">
           {navItems.map((item) => {
@@ -135,6 +135,7 @@ export default function TopNav({ profile, orgMember }) {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={true}
                 className={isActive
                   ? "text-primary bg-primary/10 px-3 py-1.5 rounded-md font-semibold transition-colors"
                   : "hover:text-primary transition-colors"}
