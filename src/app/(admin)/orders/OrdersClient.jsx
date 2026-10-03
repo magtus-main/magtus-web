@@ -425,18 +425,22 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
 
   const handleExport = () => {
     const csvRows = [
-      ["Order ID", "Order Number", "Date", "Customer", "Phone", "Amount", "Status"].join(","),
-      ...orders.map((o) =>
-        [
+      ["Order ID", "Order Number", "Date", "Customer", "Phone", "Subtotal", "Discount", "GST Amount", "Total", "Status"].join(","),
+      ...orders.map((o) => {
+        const f = getOrderFinancials(o);
+        return [
           o.id,
           o.order_number,
           formatDate(o.created_at),
-          o.dealer?.full_name || "—",
+          `"${o.dealer?.full_name || "—"}"`,
           o.dealer?.phone || "—",
-          o.total,
+          f.subtotal,
+          f.discount,
+          f.taxAmount,
+          f.total,
           o.status,
-        ].join(",")
-      ),
+        ].join(",");
+      }),
     ];
     const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -465,8 +469,33 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
     return `₹${(amount || 0).toLocaleString("en-IN")}`;
   };
 
+  // Calculate order financial breakdown (Subtotal, Discount, GST, Total) matching dealer cart
+  const getOrderFinancials = (order) => {
+    if (!order) return { subtotal: 0, discount: 0, taxableSubtotal: 0, taxPercent: 18, taxAmount: 0, total: 0 };
+    const itemsDiscount = (order.order_items || []).reduce((sum, item) => sum + (Number(item.discount_amount) || 0), 0);
+    const itemsNet = (order.order_items || []).reduce((sum, item) => sum + (Number(item.total_price) || 0), 0);
+    const itemsGross = itemsNet + itemsDiscount;
+
+    const subtotal = Number(order.subtotal) || (itemsGross > 0 ? itemsGross : Number(order.total) || 0);
+    const discount = Number(order.discount) || itemsDiscount || 0;
+    const taxableSubtotal = Math.max(0, subtotal - discount);
+    const taxPercent = order.tax_percent != null ? Number(order.tax_percent) : 18;
+    const taxAmount = order.tax_amount != null ? Number(order.tax_amount) : Math.round(taxableSubtotal * (taxPercent / 100) * 100) / 100;
+    const total = Number(order.total) || Math.round((taxableSubtotal + taxAmount) * 100) / 100;
+
+    return {
+      subtotal,
+      discount,
+      taxableSubtotal,
+      taxPercent,
+      taxAmount,
+      total,
+    };
+  };
+
   // Order Detail View
   if (selectedOrder) {
+    const fin = getOrderFinancials(selectedOrder);
     const statusConfig = getStatusConfig(selectedOrder.status);
     const StatusIcon = statusConfig.icon;
     const isCancelled = selectedOrder.status === "cancelled";
@@ -661,10 +690,26 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
                       {formatDate(selectedOrder.created_at)}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-500">Total</span>
-                    <span className="text-lg font-bold text-primary">
-                      {formatCurrency(selectedOrder.total)}
+                  <div className="pt-2 border-t border-gray-100 space-y-1.5 text-xs">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Items Subtotal</span>
+                      <span className="font-semibold text-gray-900">{formatCurrency(fin.subtotal)}</span>
+                    </div>
+                    {fin.discount > 0 && (
+                      <div className="flex justify-between text-emerald-600 font-medium">
+                        <span>Discount / Offers</span>
+                        <span className="font-bold">-{formatCurrency(fin.discount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-gray-600">
+                      <span>GST ({fin.taxPercent}%)</span>
+                      <span className="font-semibold text-gray-900">+{formatCurrency(fin.taxAmount)}</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-baseline pt-2 border-t border-gray-200">
+                    <span className="text-sm font-bold text-gray-700">Total Payable</span>
+                    <span className="text-xl font-bold text-primary">
+                      {formatCurrency(fin.total)}
                     </span>
                   </div>
                 </div>
@@ -723,68 +768,103 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(selectedOrder.order_items || []).map((item) => (
-                    <TableRow key={item.id} className="hover:bg-gray-50/50">
-                      <TableCell>
-                        <p className="font-semibold text-gray-900">
-                          {item.product?.name || "Unknown Product"}
-                        </p>
-                        {item.product?.name_hi && (
-                          <p className="text-xs text-gray-500">
-                            {item.product.name_hi}
+                  {(selectedOrder.order_items || []).map((item) => {
+                    const itemDiscount = Number(item.discount_amount) || 0;
+                    const itemDiscountPct = Number(item.discount_percentage) || 0;
+                    let offerLabel = item.applied_offer_details?.tierLabel || (itemDiscountPct > 0 ? `${itemDiscountPct}% Off` : null);
+
+                    // Intelligent fallback: if this line item didn't record discount fields,
+                    // but the order has an overall discount & applied offers in notes
+                    let effectiveDiscount = itemDiscount;
+                    let isFallbackDiscount = false;
+                    if (!offerLabel && fin.discount > 0) {
+                      const notesMatch = selectedOrder.notes?.match(/\[Applied Offers?:\s*([^\]]+)\]/i);
+                      if (notesMatch) {
+                        offerLabel = notesMatch[1];
+                      } else {
+                        offerLabel = "Discount Applied";
+                      }
+                      if (effectiveDiscount <= 0 && selectedOrder.order_items?.length === 1) {
+                        effectiveDiscount = fin.discount;
+                        isFallbackDiscount = true;
+                      }
+                    }
+
+                    const grossPrice = (Number(item.total_price) || 0) + (isFallbackDiscount ? 0 : itemDiscount);
+                    const netPrice = isFallbackDiscount ? Math.max(0, (Number(item.total_price) || 0) - effectiveDiscount) : Number(item.total_price) || 0;
+
+                    return (
+                      <TableRow key={item.id} className="hover:bg-gray-50/50">
+                        <TableCell>
+                          <p className="font-semibold text-gray-900">
+                            {item.product?.name || "Unknown Product"}
                           </p>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <p className="text-sm text-gray-700">
-                          {item.variant_label || item.variant_details?.variant_label || (item.variant_details?.finish && item.variant_details?.size ? `${item.variant_details.finish} / ${item.variant_details.size}` : "—")}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {item.sku || item.variant_details?.sku || ""}
-                        </p>
-                        {(item.discount_percentage > 0 || item.applied_offer_details) && (
-                          <div className="mt-1">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              🏷️ {item.applied_offer_details?.tierLabel || `${item.discount_percentage}% Off`}
+                          {item.product?.name_hi && (
+                            <p className="text-xs text-gray-500">
+                              {item.product.name_hi}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-sm text-gray-700">
+                            {item.variant_label || item.variant_details?.variant_label || (item.variant_details?.finish && item.variant_details?.size ? `${item.variant_details.finish} / ${item.variant_details.size}` : "—")}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {item.sku || item.variant_details?.sku || ""}
+                          </p>
+                          {offerLabel && (
+                            <div className="mt-1">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                🏷️ {offerLabel}
+                              </span>
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {formatCurrency(item.unit_price)}
+                          {item.ordered_unit === 'box' && (
+                            <span className="text-[10px] text-gray-400 block">per box</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {item.ordered_unit === 'box' ? (
+                            <div>
+                              <span className="font-bold text-gray-900 text-sm">
+                                {item.quantity} Box{item.quantity > 1 ? 'es' : ''}
+                              </span>
+                              <span className="block text-[11px] text-gray-500 font-medium">
+                                ({item.total_pcs || (item.quantity * (item.pcs_per_box || 1))} pcs)
+                              </span>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="font-bold text-gray-900 text-sm">{item.quantity}</span>
+                              <span className="text-xs text-gray-500 ml-1">pcs</span>
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {effectiveDiscount > 0 ? (
+                            <div>
+                              <span className="text-[11px] text-gray-400 line-through block">
+                                {formatCurrency(grossPrice)}
+                              </span>
+                              <span className="font-bold text-gray-900 text-sm block">
+                                {formatCurrency(netPrice)}
+                              </span>
+                              <span className="text-[10px] text-emerald-600 font-semibold block">
+                                -{formatCurrency(effectiveDiscount)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="font-bold text-gray-900 text-sm block">
+                              {formatCurrency(netPrice)}
                             </span>
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(item.unit_price)}
-                        {item.ordered_unit === 'box' && (
-                          <span className="text-[10px] text-gray-400 block">per box</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {item.ordered_unit === 'box' ? (
-                          <div>
-                            <span className="font-bold text-gray-900 text-sm">
-                              {item.quantity} Box{item.quantity > 1 ? 'es' : ''}
-                            </span>
-                            <span className="block text-[11px] text-gray-500 font-medium">
-                              ({item.total_pcs || (item.quantity * (item.pcs_per_box || 1))} pcs)
-                            </span>
-                          </div>
-                        ) : (
-                          <div>
-                            <span className="font-bold text-gray-900 text-sm">{item.quantity}</span>
-                            <span className="text-xs text-gray-500 ml-1">pcs</span>
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className="font-bold text-primary text-sm block">
-                          {formatCurrency(item.total_price)}
-                        </span>
-                        {item.discount_amount > 0 && (
-                          <span className="text-[10px] text-emerald-600 font-medium block">
-                            Saved {formatCurrency(item.discount_amount)}
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                   {(!selectedOrder.order_items ||
                     selectedOrder.order_items.length === 0) && (
                       <TableRow>
@@ -798,15 +878,47 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
                     )}
                 </TableBody>
               </Table>
-              {/* Total Footer */}
-              <div className="p-5 border-t border-gray-200 bg-gray-50/50 flex justify-end">
-                <div className="text-right">
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                    Order Total
-                  </span>
-                  <p className="text-2xl font-bold text-primary mt-1">
-                    {formatCurrency(selectedOrder.total)}
-                  </p>
+              {/* Total & Tax Calculation Breakdown (matching dealer cart) */}
+              <div className="p-5 border-t border-gray-200 bg-gray-50/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                {fin.discount > 0 ? (
+                  <div className="inline-flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium">
+                    <span className="text-xl">🏷️</span>
+                    <div>
+                      <span className="block font-bold text-emerald-900">Promotional Offer Applied</span>
+                      <span className="text-emerald-700">Total Saved: <strong className="font-bold">{formatCurrency(fin.discount)}</strong></span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400">
+                    Standard order calculation • Tax calculated on taxable subtotal
+                  </div>
+                )}
+
+                <div className="w-full sm:w-80 space-y-2 bg-white p-4 rounded-xl border border-gray-200 shadow-2xs">
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>Items Subtotal:</span>
+                    <span className="font-semibold text-gray-900">{formatCurrency(fin.subtotal)}</span>
+                  </div>
+                  {fin.discount > 0 && (
+                    <div className="flex justify-between text-xs text-emerald-600 font-medium">
+                      <span>Discount (Offers):</span>
+                      <span className="font-bold">-{formatCurrency(fin.discount)}</span>
+                    </div>
+                  )}
+                  {fin.discount > 0 && (
+                    <div className="flex justify-between text-xs text-gray-500 font-medium pt-1 border-t border-dashed border-gray-100">
+                      <span>Taxable Subtotal:</span>
+                      <span className="font-medium text-gray-800">{formatCurrency(fin.taxableSubtotal)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>GST ({fin.taxPercent}%):</span>
+                    <span className="font-semibold text-gray-900">+{formatCurrency(fin.taxAmount)}</span>
+                  </div>
+                  <div className="flex justify-between items-baseline pt-2.5 border-t border-gray-200">
+                    <span className="text-sm font-bold text-gray-900 uppercase tracking-wider">Total:</span>
+                    <span className="text-2xl font-bold text-primary">{formatCurrency(fin.total)}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1152,9 +1264,26 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <span className="text-sm font-bold text-gray-900">
-                          {formatCurrency(order.total)}
-                        </span>
+                        {(() => {
+                          const f = getOrderFinancials(order);
+                          return (
+                            <div>
+                              <span className="text-sm font-bold text-gray-900 block">
+                                {formatCurrency(f.total)}
+                              </span>
+                              <div className="text-[10px] text-gray-500 flex items-center justify-end gap-1.5 flex-wrap mt-0.5">
+                                {f.discount > 0 && (
+                                  <span className="text-emerald-600 font-semibold" title="Dealer Discount">
+                                    -{formatCurrency(f.discount)}
+                                  </span>
+                                )}
+                                <span className="text-gray-400">
+                                  GST: {formatCurrency(f.taxAmount)}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         <span

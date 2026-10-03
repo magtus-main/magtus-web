@@ -404,49 +404,77 @@ export async function generateOrderPdf(order) {
     doc.text(wrappedNotes.slice(0, 4), margin, summaryStartY + 9);
   }
 
+  // Financial Breakdown
+  const orderSubtotal = Number(order.subtotal) || (items.reduce((s, it) => s + (Number(it.total_price) || 0), 0)) || Number(order.total) || 0;
+  const orderDiscount = Number(order.discount) || (items.reduce((s, it) => s + (Number(it.discount_amount) || 0), 0)) || 0;
+  const taxableSubtotal = Math.max(0, orderSubtotal - orderDiscount);
+  const taxPercent = order.tax_percent != null ? Number(order.tax_percent) : 18;
+  const taxAmount = order.tax_amount != null ? Number(order.tax_amount) : Math.round(taxableSubtotal * (taxPercent / 100) * 100) / 100;
+  const grandTotal = Number(order.total) || Math.round((taxableSubtotal + taxAmount) * 100) / 100;
+  const hasDiscount = orderDiscount > 0;
+  const totalsCardHeight = hasDiscount ? 42 : 35;
+
   // Right Side: Totals Card
   doc.setFillColor(...BG_LIGHT);
   doc.setDrawColor(...BORDER_COLOR);
   doc.setLineWidth(0.3);
-  doc.roundedRect(rightTotalsX, summaryStartY, rightTotalsWidth, 34, 2, 2, "FD");
+  doc.roundedRect(rightTotalsX, summaryStartY, rightTotalsWidth, totalsCardHeight, 2, 2, "FD");
+
+  let lineY = summaryStartY + 5.5;
 
   // Total Quantity row
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(...TEXT_MUTED);
-  doc.text("Total Items:", rightTotalsX + 4, summaryStartY + 6);
+  doc.text("Total Items:", rightTotalsX + 4, lineY);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...TEXT_DARK);
-  doc.text(`${totalQuantity || items.length} pcs`, rightTotalsX + rightTotalsWidth - 4, summaryStartY + 6, { align: "right" });
+  doc.text(`${totalQuantity || items.length} pcs`, rightTotalsX + rightTotalsWidth - 4, lineY, { align: "right" });
 
   // Subtotal row
+  lineY += 5.5;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(...TEXT_MUTED);
-  doc.text("Subtotal:", rightTotalsX + 4, summaryStartY + 12);
+  doc.text("Subtotal:", rightTotalsX + 4, lineY);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...TEXT_DARK);
-  doc.text(formatCurrency(order.total), rightTotalsX + rightTotalsWidth - 4, summaryStartY + 12, { align: "right" });
+  doc.text(formatCurrency(orderSubtotal), rightTotalsX + rightTotalsWidth - 4, lineY, { align: "right" });
 
-  // Taxes note (included)
+  // Discount row (if any)
+  if (hasDiscount) {
+    lineY += 5.5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(16, 149, 93); // Emerald green
+    doc.text("Discount (Promo):", rightTotalsX + 4, lineY);
+    doc.setFont("helvetica", "bold");
+    doc.text(`-${formatCurrency(orderDiscount)}`, rightTotalsX + rightTotalsWidth - 4, lineY, { align: "right" });
+  }
+
+  // Taxes (GST)
+  lineY += 5.5;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
+  doc.setFontSize(8);
   doc.setTextColor(...TEXT_MUTED);
-  doc.text("Taxes (GST):", rightTotalsX + 4, summaryStartY + 17);
-  doc.text("Inclusive / As Applicable", rightTotalsX + rightTotalsWidth - 4, summaryStartY + 17, { align: "right" });
+  doc.text(`GST (${taxPercent}%):`, rightTotalsX + 4, lineY);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...TEXT_DARK);
+  doc.text(`+${formatCurrency(taxAmount)}`, rightTotalsX + rightTotalsWidth - 4, lineY, { align: "right" });
 
   // Grand Total highlight bar
+  lineY += 4.5;
   doc.setFillColor(...PRIMARY);
-  doc.roundedRect(rightTotalsX + 2, summaryStartY + 21, rightTotalsWidth - 4, 10, 1.5, 1.5, "F");
+  doc.roundedRect(rightTotalsX + 2, lineY, rightTotalsWidth - 4, 9, 1.5, 1.5, "F");
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(255, 255, 255);
-  doc.text("GRAND TOTAL:", rightTotalsX + 6, summaryStartY + 27.5);
-  doc.setFontSize(10.5);
-  doc.text(formatCurrency(order.total), rightTotalsX + rightTotalsWidth - 6, summaryStartY + 27.5, { align: "right" });
+  doc.text("GRAND TOTAL:", rightTotalsX + 5, lineY + 6);
+  doc.setFontSize(10);
+  doc.text(formatCurrency(grandTotal), rightTotalsX + rightTotalsWidth - 5, lineY + 6, { align: "right" });
 
-  currentY = summaryStartY + 38;
+  currentY = summaryStartY + totalsCardHeight + 5;
 
   // Signatures & Declaration Box
   if (currentY + 22 > pageHeight - 15) {
