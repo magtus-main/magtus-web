@@ -27,10 +27,15 @@ export default function ProductForm({
 
   // Track if user manually modified DP to avoid unwanted overwrites
   const [isDpManuallyEdited, setIsDpManuallyEdited] = useState(Boolean(editingProductId));
+  const [matrixDpPercentage, setMatrixDpPercentage] = useState(defaultDpPercentage);
 
   useEffect(() => {
     setIsDpManuallyEdited(Boolean(editingProductId));
   }, [editingProductId]);
+
+  useEffect(() => {
+    setMatrixDpPercentage(defaultDpPercentage);
+  }, [defaultDpPercentage]);
 
   // Helper to calculate DP from MRP based on percentage
   const calculateDp = (mrpVal, percent = defaultDpPercentage) => {
@@ -99,7 +104,7 @@ export default function ProductForm({
       if (field === "mrp") {
         if (!currentCell.dealer_price || currentCell._dpAuto) {
           if (value && parseFloat(value) > 0) {
-            currentCell.dealer_price = calculateDp(value);
+            currentCell.dealer_price = calculateDp(value, matrixDpPercentage);
             currentCell._dpAuto = true;
           } else if (!value) {
             currentCell.dealer_price = "";
@@ -114,20 +119,21 @@ export default function ProductForm({
     } else {
       const newCell = { [rowKey]: row, [colKey]: col, [field]: value };
       if (field === "mrp" && value && parseFloat(value) > 0) {
-        newCell.dealer_price = calculateDp(value);
+        newCell.dealer_price = calculateDp(value, matrixDpPercentage);
         newCell._dpAuto = true;
       }
       setPriceMatrix([...priceMatrix, newCell]);
     }
   };
 
-  const handleAutoCalcAllMatrixDp = () => {
+  const handleAutoCalcAllMatrixDp = (percent = matrixDpPercentage) => {
     if (priceMatrix.length === 0) return;
+    const effectivePercent = parseFloat(percent) || 0;
     const updated = priceMatrix.map(cell => {
       if (cell.mrp && parseFloat(cell.mrp) > 0) {
         return {
           ...cell,
-          dealer_price: calculateDp(cell.mrp),
+          dealer_price: calculateDp(cell.mrp, effectivePercent),
           _dpAuto: true,
         };
       }
@@ -446,25 +452,40 @@ export default function ProductForm({
             {/* RIGHT: Matrix grid */}
             <div className="lg:col-span-8">
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden h-full flex flex-col">
-                <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50 flex-shrink-0">
+                <div className="px-5 py-3 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 bg-gray-50 flex-shrink-0">
                   <div>
                     <h3 className="text-sm font-bold text-gray-900">Price Matrix</h3>
-                    <p className="text-[11px] text-gray-500">Finish (rows) × Size (columns) • DP auto-calculates at {defaultDpPercentage}% off MRP</p>
+                    <p className="text-[11px] text-gray-500">Finish (rows) × Size (columns) • DP auto-calculates at {matrixDpPercentage}% off MRP</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {priceMatrix.length > 0 && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAutoCalcAllMatrixDp}
-                        className="text-xs h-8 text-primary border-primary/30 hover:bg-primary/5"
-                        title={`Apply ${defaultDpPercentage}% DP discount across all matrix variants`}
-                      >
-                        <Percent size={12} className="mr-1" />
-                        Apply {defaultDpPercentage}% DP to All
-                      </Button>
-                    )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-md px-2.5 py-1 shadow-sm">
+                      <span className="text-xs font-semibold text-gray-600">DP Off:</span>
+                      <div className="flex items-center">
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={matrixDpPercentage}
+                          onChange={(e) => setMatrixDpPercentage(e.target.value)}
+                          className="h-7 w-16 text-xs font-semibold px-1.5 py-0 text-center bg-gray-50 border-gray-200 focus-visible:bg-white"
+                          placeholder="%"
+                        />
+                        <span className="text-xs font-bold text-gray-400 ml-1">%</span>
+                      </div>
+                      {priceMatrix.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleAutoCalcAllMatrixDp(matrixDpPercentage)}
+                          className="text-xs h-7 px-2.5 text-primary border-primary/30 hover:bg-primary/5 font-medium ml-1"
+                          title={`Apply ${matrixDpPercentage}% DP discount across all matrix variants`}
+                        >
+                          Apply to All
+                        </Button>
+                      )}
+                    </div>
                     {colValues.length > 0 && rowValues.length > 0 && (
                       <Button size="sm" onClick={generateEmptyMatrix} className="bg-primary text-white text-xs h-8">
                         Generate Matrix

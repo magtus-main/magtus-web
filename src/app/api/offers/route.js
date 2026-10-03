@@ -10,14 +10,22 @@ export async function GET(request) {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const now = new Date().toISOString();
+    const { searchParams } = new URL(request.url);
+    const role = searchParams.get("role");
 
-    const { data: offers, error } = await supabase
+    let query = supabase
       .from("offers")
       .select("*")
       .eq("is_active", true)
       .lte("start_date", now)
       .gte("end_date", now)
       .order("priority", { ascending: false });
+
+    if (role && role !== "all") {
+      query = query.or(`target_role.eq.all,target_role.eq.${role},target.eq.all,target.eq.${role}`);
+    }
+
+    const { data: offers, error } = await query;
 
     if (error) {
       return NextResponse.json({ success: false, error: error.message }, { status: 400 });

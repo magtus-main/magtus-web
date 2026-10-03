@@ -30,10 +30,13 @@ import {
   Layers, 
   AlertCircle,
   CheckCircle2,
-  X
+  X,
+  Image as ImageIcon,
+  Upload
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { formatDate } from "@/lib/utils";
+import { optimizeImage } from "@/utils/imageOptimizer";
 
 // Convert ISO / Date object to DD/MM/YYYY HH:mm display format
 function toDisplayDate(isoOrDate) {
@@ -144,6 +147,8 @@ function getInitialFormState() {
   return {
     title: "",
     description: "",
+    target_role: "all",
+    carousel_image_url: "",
     offer_type: "tiered_discount",
     value: 0,
     applicable_unit: "box",
@@ -169,12 +174,14 @@ export default function OffersClient({
   const hasEditPermission = hasModulePermission(profile, orgMember, "offers", "edit");
   const [offers, setOffers] = useState(initialOffers);
   const [searchQuery, setSearchQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
   const [unitFilter, setUnitFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOfferId, setEditingOfferId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const [formData, setFormData] = useState(getInitialFormState);
 
@@ -200,6 +207,8 @@ export default function OffersClient({
     setFormData({
       title: offer.title || "",
       description: offer.description || "",
+      target_role: offer.target_role || offer.target || "all",
+      carousel_image_url: offer.carousel_image_url || offer.banner_url || "",
       offer_type: offer.offer_type || "tiered_discount",
       value: offer.value || 0,
       applicable_unit: offer.applicable_unit || "box",
@@ -242,6 +251,80 @@ export default function OffersClient({
     }
     const updated = formData.tiers.filter((_, i) => i !== index);
     setFormData({ ...formData, tiers: updated });
+  };
+
+  // Upload carousel image to storage (folder: 'offers')
+  const handleUploadCarouselImage = async (file) => {
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select a valid image file (PNG, JPG, WebP)");
+      return;
+    }
+
+    setIsUploadingImage(true);
+    const toastId = toast.loading("Optimizing and uploading banner to offers/ folder...");
+
+    try {
+      let optimizedFile;
+      try {
+        optimizedFile = await optimizeImage(file);
+      } catch (optErr) {
+        console.warn("Image optimization fallback to original:", optErr);
+        optimizedFile = file;
+      }
+
+      const fileExt = optimizedFile.name?.split('.').pop() || 'webp';
+      const cleanTitle = (formData.title || "offer")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)+/g, "");
+      const fileName = `offers/${cleanTitle || "banner"}_${Date.now()}.${fileExt}`;
+
+      // Try uploading to 'offers' folder in 'products' bucket, or bucket 'offers'
+      let targetBucket = "products";
+      let uploadPath = fileName;
+
+      let { error: uploadError } = await supabase.storage
+        .from(targetBucket)
+        .upload(uploadPath, optimizedFile, {
+          upsert: true,
+          contentType: optimizedFile.type || "image/webp",
+        });
+
+      // If 'products' bucket doesn't exist, try bucket 'offers'
+      if (uploadError && (uploadError.message?.toLowerCase().includes("not found") || uploadError.statusCode === '404')) {
+        targetBucket = "offers";
+        uploadPath = `${cleanTitle || "banner"}_${Date.now()}.${fileExt}`;
+        const fallbackRes = await supabase.storage
+          .from(targetBucket)
+          .upload(uploadPath, optimizedFile, {
+            upsert: true,
+            contentType: optimizedFile.type || "image/webp",
+          });
+        uploadError = fallbackRes.error;
+      }
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from(targetBucket)
+        .getPublicUrl(uploadPath);
+
+      setFormData((prev) => ({
+        ...prev,
+        carousel_image_url: publicUrl,
+      }));
+
+      toast.success("Banner uploaded to offers folder!", { id: toastId });
+    } catch (err) {
+      console.error("Failed to upload image:", err);
+      toast.error(err.message || "Failed to upload image to storage", { id: toastId });
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const handleTierChange = (index, field, value) => {
@@ -290,6 +373,10 @@ export default function OffersClient({
       const payload = {
         title: formData.title.trim(),
         description: formData.description.trim(),
+        target_role: formData.target_role || "all",
+        target: formData.target_role || "all",
+        carousel_image_url: (formData.carousel_image_url || "").trim() || null,
+        banner_url: (formData.carousel_image_url || "").trim() || null,
         offer_type: formData.offer_type || "tiered_discount",
         value: sortedTiers[0]?.discount_percentage || 0,
         starts_at: startDateIso,
@@ -395,13 +482,16 @@ export default function OffersClient({
     
     const matchesUnit = unitFilter === "all" || offer.applicable_unit === unitFilter;
 
+    const offerRole = offer.target_role || offer.target || "all";
+    const matchesRole = roleFilter === "all" || offerRole === roleFilter;
+
     let matchesStatus = true;
     const status = getOfferStatus(offer).label.toLowerCase();
     if (statusFilter !== "all") {
       matchesStatus = status === statusFilter;
     }
 
-    return matchesSearch && matchesUnit && matchesStatus;
+    return matchesSearch && matchesUnit && matchesRole && matchesStatus;
   });
 
   return (
@@ -435,7 +525,18 @@ export default function OffersClient({
             />
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {/* Audience / Role Filter */}
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 text-gray-700"
+            >
+              <option value="all">All Audiences</option>
+              <option value="dealer">Dealers Only</option>
+              <option value="carpenter">Carpenters Only</option>
+            </select>
+
             {/* Unit Filter */}
             <select
               value={unitFilter}
@@ -469,6 +570,7 @@ export default function OffersClient({
             <TableHeader className="bg-gray-50/75">
               <TableRow>
                 <TableHead className="font-bold text-gray-700">Offer / Title</TableHead>
+                <TableHead className="font-bold text-gray-700">Audience</TableHead>
                 <TableHead className="font-bold text-gray-700">Scope</TableHead>
                 <TableHead className="font-bold text-gray-700">Unit</TableHead>
                 <TableHead className="font-bold text-gray-700">Brackets / Discount</TableHead>
@@ -482,13 +584,48 @@ export default function OffersClient({
                 filteredOffers.map((offer) => {
                   const status = getOfferStatus(offer);
                   const tiers = Array.isArray(offer.tiers) ? offer.tiers : [];
+                  const bannerImg = offer.carousel_image_url || offer.banner_url;
 
                   return (
                     <TableRow key={offer.id} className="hover:bg-gray-50/50">
                       <TableCell>
-                        <div className="font-semibold text-gray-900">{offer.title}</div>
-                        {offer.description && (
-                          <div className="text-xs text-gray-500 line-clamp-1 mt-0.5">{offer.description}</div>
+                        <div className="flex items-center gap-3">
+                          {bannerImg ? (
+                            <img
+                              src={bannerImg}
+                              alt=""
+                              className="w-14 h-8 object-cover rounded border border-gray-200 shadow-2xs flex-shrink-0"
+                              onError={(e) => { e.target.style.display = 'none'; }}
+                            />
+                          ) : (
+                            <div className="w-14 h-8 rounded bg-gray-100 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 flex-shrink-0" title="No Carousel Image">
+                              <ImageIcon size={14} />
+                            </div>
+                          )}
+                          <div>
+                            <div className="font-semibold text-gray-900">{offer.title}</div>
+                            {offer.description && (
+                              <div className="text-xs text-gray-500 line-clamp-1 mt-0.5">{offer.description}</div>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      <TableCell>
+                        {(offer.target_role === "dealer" || offer.target === "dealer") && (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-semibold">
+                            👔 Dealer
+                          </Badge>
+                        )}
+                        {(offer.target_role === "carpenter" || offer.target === "carpenter") && (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold">
+                            🪚 Carpenter
+                          </Badge>
+                        )}
+                        {(!offer.target_role || offer.target_role === "all" || (!offer.target_role && offer.target === "all")) && (
+                          <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 text-xs">
+                            🌐 All Users
+                          </Badge>
                         )}
                       </TableCell>
 
@@ -647,8 +784,22 @@ export default function OffersClient({
                 </div>
               </div>
 
-              {/* Unit Selection & Target Scope */}
+              {/* Target Audience & Unit Selection */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="font-semibold text-gray-700 text-sm">Target Audience</Label>
+                  <select
+                    className="w-full h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 focus:bg-white"
+                    value={formData.target_role}
+                    onChange={(e) => setFormData({ ...formData, target_role: e.target.value })}
+                  >
+                    <option value="all">🌐 All Users (Dealers & Carpenters)</option>
+                    <option value="dealer">👔 Dealers Only</option>
+                    <option value="carpenter">🪚 Carpenters Only</option>
+                  </select>
+                  <p className="text-[11px] text-gray-500">Controls which mobile app role sees this offer in their carousel.</p>
+                </div>
+
                 <div className="space-y-1.5">
                   <Label className="font-semibold text-gray-700 text-sm">Applicable Unit</Label>
                   <select
@@ -661,19 +812,118 @@ export default function OffersClient({
                     <option value="any">Any Unit (Box or Piece)</option>
                   </select>
                 </div>
+              </div>
 
-                <div className="space-y-1.5">
-                  <Label className="font-semibold text-gray-700 text-sm">Target Scope</Label>
-                  <select
-                    className="w-full h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 focus:bg-white"
-                    value={formData.target_type}
-                    onChange={(e) => setFormData({ ...formData, target_type: e.target.value, target_ids: [] })}
-                  >
-                    <option value="all_products">All Products</option>
-                    <option value="category">Specific Category</option>
-                    <option value="product">Specific Products</option>
-                  </select>
+              {/* Carousel Banner Image Upload */}
+              <div className="space-y-3 p-4 bg-gray-50/80 rounded-xl border border-gray-200">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <Label className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+                      <ImageIcon size={16} className="text-primary" /> Carousel Banner Image
+                    </Label>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Saved in Supabase storage folder: <code className="font-mono text-primary font-bold">offers/</code>
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                    Recommended: 800 × 340 px (2.35:1) • Max 1 MB
+                  </span>
                 </div>
+
+                {formData.carousel_image_url ? (
+                  <div className="space-y-2">
+                    <div className="relative group rounded-xl border border-gray-200 overflow-hidden bg-gray-100 w-full max-w-md aspect-[2.35/1] shadow-xs">
+                      <img
+                        src={formData.carousel_image_url}
+                        alt="Carousel Banner Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <label className="cursor-pointer px-3 py-1.5 bg-white text-gray-900 text-xs font-semibold rounded-lg shadow hover:bg-gray-100 flex items-center gap-1.5">
+                          <Upload size={13} />
+                          Replace Banner
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={isUploadingImage}
+                            onChange={(e) => {
+                              if (e.target.files?.[0]) {
+                                handleUploadCarouselImage(e.target.files[0]);
+                                e.target.value = "";
+                              }
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, carousel_image_url: "" })}
+                          className="px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg shadow hover:bg-red-700 flex items-center gap-1"
+                        >
+                          <Trash2 size={13} />
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-gray-500 flex items-center gap-1 break-all">
+                      <span className="text-gray-400 font-medium">Path:</span> {formData.carousel_image_url}
+                    </div>
+                  </div>
+                ) : (
+                  <label className="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl bg-white hover:bg-gray-50/80 transition-colors cursor-pointer p-6 text-center w-full max-w-md aspect-[2.35/1] group">
+                    {isUploadingImage ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        <span className="text-xs font-semibold text-gray-600">Uploading to storage offers/ folder...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                          <Upload size={20} />
+                        </div>
+                        <span className="text-xs font-bold text-gray-800">Click or drag banner image to upload</span>
+                        <span className="text-[11px] text-gray-400 mt-1">Automatically compressed & saved to <code className="text-primary font-mono font-medium">offers/</code> folder</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={isUploadingImage}
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              handleUploadCarouselImage(e.target.files[0]);
+                              e.target.value = "";
+                            }
+                          }}
+                        />
+                      </>
+                    )}
+                  </label>
+                )}
+
+                {/* Optional direct URL input */}
+                <div className="flex items-center gap-2 pt-1 max-w-md">
+                  <span className="text-[11px] text-gray-400 font-medium whitespace-nowrap">Or URL:</span>
+                  <Input
+                    placeholder="https://... direct image URL"
+                    value={formData.carousel_image_url}
+                    onChange={(e) => setFormData({ ...formData, carousel_image_url: e.target.value })}
+                    className="h-8 text-xs bg-white"
+                  />
+                </div>
+              </div>
+
+              {/* Target Scope */}
+              <div className="space-y-1.5">
+                <Label className="font-semibold text-gray-700 text-sm">Target Scope</Label>
+                <select
+                  className="w-full h-10 px-3 border border-gray-200 rounded-md text-sm bg-gray-50 focus:bg-white"
+                  value={formData.target_type}
+                  onChange={(e) => setFormData({ ...formData, target_type: e.target.value, target_ids: [] })}
+                >
+                  <option value="all_products">All Products</option>
+                  <option value="category">Specific Category</option>
+                  <option value="product">Specific Products</option>
+                </select>
               </div>
 
               {/* Target Selector based on scope */}
