@@ -79,7 +79,8 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
     redemptions: { view: true, edit: false },
     orders: { view: true, edit: false },
     team: { view: true, edit: false },
-    products: { view: true, edit: false }
+    products: { view: true, edit: false },
+    offers: { view: true, edit: false }
   },
   order_steps: {
     confirm: false,

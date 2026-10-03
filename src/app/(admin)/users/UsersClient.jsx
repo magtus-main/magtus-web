@@ -302,7 +302,7 @@ export default function UsersClient({ initialUsers, initialCount, profile, orgMe
           u.business_name || "",
           u.total_points || 0,
           u.status || "active",
-          new Date(u.created_at).toLocaleDateString("en-IN"),
+          formatDate(u.created_at),
         ].join(",")
       ),
     ];
@@ -319,11 +319,12 @@ export default function UsersClient({ initialUsers, initialCount, profile, orgMe
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "—";
-    return new Date(dateStr).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "—";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const getRoleBadge = (role) => {

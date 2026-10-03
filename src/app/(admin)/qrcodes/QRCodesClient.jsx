@@ -217,7 +217,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
             qr.reward_points || 0,
             qr.status,
             `"${qr.scanned_by_profile?.full_name || "—"}"`,
-            qr.scanned_at ? new Date(qr.scanned_at).toLocaleDateString("en-IN") : "—",
+            qr.scanned_at ? formatDate(qr.scanned_at) : "—",
           ].join(",")
         ),
       ];
@@ -488,11 +488,12 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "—";
-    return new Date(dateStr).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "—";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const getStatusConfig = (status) => {

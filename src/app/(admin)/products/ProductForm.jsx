@@ -143,7 +143,7 @@ export default function ProductForm({
     for (const row of rowValues) {
       for (const col of colValues) {
         const found = existing.find(m => m.finish === row && m.size === col);
-        newMatrix.push(found || { finish: row, size: col, mrp: "", dealer_price: "", reward_points: "", stock: "", min_stock: "" });
+        newMatrix.push(found || { finish: row, size: col, mrp: "", dealer_price: "", pcs_per_box: productForm.pcs_per_box || "1", reward_points: "", stock: "", min_stock: "" });
       }
     }
     setPriceMatrix(newMatrix);
@@ -343,6 +343,18 @@ export default function ProductForm({
                     <Label className="text-sm font-semibold text-gray-700">Default Min Stock</Label>
                     <Input type="number" placeholder="5" value={productForm.min_stock_level || ""} onChange={(e) => setProductForm({ ...productForm, min_stock_level: e.target.value })} className="bg-gray-50" />
                   </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-semibold text-gray-700">Pcs / Box</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      placeholder="1"
+                      value={productForm.pcs_per_box ?? "1"}
+                      onChange={(e) => setProductForm({ ...productForm, pcs_per_box: e.target.value })}
+                      className="bg-gray-50 focus-visible:bg-white"
+                      title="Number of loose pieces packed in 1 box"
+                    />
+                  </div>
                 </div>
                 {/* Toggle switches */}
                 <div className="flex flex-wrap gap-3 pt-3 border-t border-gray-100">
@@ -357,6 +369,12 @@ export default function ProductForm({
                       <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${productForm.is_featured ? 'left-[18px]' : 'left-0.5'}`} />
                     </div>
                     <span className="text-sm font-medium text-gray-700">Featured</span>
+                  </div>
+                  <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => setProductForm({ ...productForm, allow_loose_pcs: !productForm.allow_loose_pcs })}>
+                    <div className={`w-9 h-5 rounded-full relative transition-colors ${productForm.allow_loose_pcs ? 'bg-primary' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${productForm.allow_loose_pcs ? 'left-[18px]' : 'left-0.5'}`} />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">Allow Loose Pcs</span>
                   </div>
                 </div>
               </div>
@@ -486,6 +504,7 @@ export default function ProductForm({
                             const subRows = [
                               { key: "mrp", label: "MRP", type: "number" },
                               { key: "dealer_price", label: "DP", type: "number" },
+                              { key: "pcs_per_box", label: "Pcs/Box", type: "number" },
                               { key: "reward_points", label: "Pts", type: "number" },
                               { key: "stock", label: "Stk", type: "number" },
                               { key: "min_stock", label: "Min Stk", type: "number" },

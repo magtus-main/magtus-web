@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { LayoutDashboard, Package, ShoppingCart, Settings, Users, Image as ImageIcon, Box, Phone, MessageSquare, BarChart2, Gift } from "lucide-react";
+import { LayoutDashboard, Package, ShoppingCart, Settings, Users, Image as ImageIcon, Box, Phone, MessageSquare, BarChart2, Gift, BadgePercent } from "lucide-react";
 
 export default function Sidebar() {
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
     { icon: Package, label: "Products", href: "/products" },
+    { icon: BadgePercent, label: "Offers", href: "/offers" },
     { icon: ShoppingCart, label: "Orders", href: "/orders" },
     { icon: Users, label: "Users", href: "/users" },
     { icon: Box, label: "QR Codes", href: "/qrcodes" },

@@ -98,6 +98,7 @@ export default function TopNav({ profile, orgMember }) {
   const allNavItems = [
     { label: "Dashboard", href: "/dashboard", show: true },
     { label: "Products", href: "/products", show: hasModulePermission(profile, orgMember, "products", "view") },
+    { label: "Offers", href: "/offers", show: profile?.role === "admin" },
     { label: "Orders", href: "/orders", show: hasModulePermission(profile, orgMember, "orders", "view") },
     { label: "Users", href: "/users", show: hasModulePermission(profile, orgMember, "users", "view") },
     { label: "QR Codes", href: "/qrcodes", show: hasModulePermission(profile, orgMember, "qrcodes", "view") },

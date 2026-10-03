@@ -69,6 +69,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
     min_stock_level: "5",
     gst_percentage: defaultGstPercentage.toString(),
     hsn_code: "",
+    pcs_per_box: "1",
+    allow_loose_pcs: true,
   });
 
   const [productImages, setProductImages] = useState([]); // { file: File, url: string, isExisting: boolean, id?: string, is_primary?: boolean }
@@ -130,6 +132,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
       min_stock_level: product.min_stock_level?.toString() || "5",
       gst_percentage: (product.specifications?.gst_percentage ?? product.specifications?.tax_percentage ?? defaultGstPercentage)?.toString() || "18",
       hsn_code: product.specifications?.hsn_code || product.specifications?.hsn || "",
+      pcs_per_box: (product.specifications?.pcs_per_box ?? 1).toString(),
+      allow_loose_pcs: product.specifications?.allow_loose_pcs ?? true,
     });
 
     // Load existing images
@@ -159,6 +163,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
       description_hi: "", is_active: true, is_featured: false, min_stock_level: "5",
       gst_percentage: defaultGstPercentage.toString(),
       hsn_code: "",
+      pcs_per_box: "1",
+      allow_loose_pcs: true,
     });
     setProductImages([]);
     setCustomFields({});
@@ -235,6 +241,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
           finishImages: finishImages,
           gst_percentage: parseFloat(productForm.gst_percentage) || 0,
           hsn_code: (productForm.hsn_code || "").trim(),
+          pcs_per_box: parseInt(productForm.pcs_per_box) || 1,
+          allow_loose_pcs: productForm.allow_loose_pcs ?? true,
           priceMatrix: priceMatrix.map(m => {
             const { _dpAuto, ...cleanM } = m;
             return {
@@ -244,6 +252,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
               reward_points: parseInt(m.reward_points) || 0,
               stock: parseInt(m.stock) || 0,
               min_stock: parseInt(m.min_stock) || 5,
+              pcs_per_box: parseInt(m.pcs_per_box) || parseInt(productForm.pcs_per_box) || 1,
               sku: `${baseSku}-${(m.finish || '').replace(/\s+/g, '').toUpperCase()}-${(m.size || '').replace(/\s+/g, '').toUpperCase()}`
             };
           }),

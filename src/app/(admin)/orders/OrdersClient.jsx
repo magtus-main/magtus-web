@@ -367,6 +367,7 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
           organization:organizations!organization_id(id, name, city, state, address),
           order_items(
             id, quantity, unit_price, total_price, product_name, variant_details,
+            ordered_unit, pcs_per_box, total_pcs, discount_percentage, discount_amount, applied_offer_details,
             product:products(id, name, name_hi)
           )`
         )
@@ -401,6 +402,7 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
             organization:organizations!organization_id(id, name, city, state, address),
             order_items(
               id, quantity, unit_price, total_price, product_name, variant_details,
+              ordered_unit, pcs_per_box, total_pcs, discount_percentage, discount_amount, applied_offer_details,
               product:products(id, name, name_hi)
             )`
           )
@@ -428,7 +430,7 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
         [
           o.id,
           o.order_number,
-          new Date(o.created_at).toLocaleDateString("en-IN"),
+          formatDate(o.created_at),
           o.dealer?.full_name || "—",
           o.dealer?.phone || "—",
           o.total,
@@ -451,11 +453,12 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "—";
-    return new Date(dateStr).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "—";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
   };
 
   const formatCurrency = (amount) => {
@@ -739,15 +742,46 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
                         <p className="text-xs text-gray-400">
                           {item.sku || item.variant_details?.sku || ""}
                         </p>
+                        {(item.discount_percentage > 0 || item.applied_offer_details) && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              🏷️ {item.applied_offer_details?.tierLabel || `${item.discount_percentage}% Off`}
+                            </span>
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(item.unit_price)}
+                        {item.ordered_unit === 'box' && (
+                          <span className="text-[10px] text-gray-400 block">per box</span>
+                        )}
                       </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {item.quantity}
+                      <TableCell className="text-right">
+                        {item.ordered_unit === 'box' ? (
+                          <div>
+                            <span className="font-bold text-gray-900 text-sm">
+                              {item.quantity} Box{item.quantity > 1 ? 'es' : ''}
+                            </span>
+                            <span className="block text-[11px] text-gray-500 font-medium">
+                              ({item.total_pcs || (item.quantity * (item.pcs_per_box || 1))} pcs)
+                            </span>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="font-bold text-gray-900 text-sm">{item.quantity}</span>
+                            <span className="text-xs text-gray-500 ml-1">pcs</span>
+                          </div>
+                        )}
                       </TableCell>
-                      <TableCell className="text-right font-bold text-primary">
-                        {formatCurrency(item.total_price)}
+                      <TableCell className="text-right">
+                        <span className="font-bold text-primary text-sm block">
+                          {formatCurrency(item.total_price)}
+                        </span>
+                        {item.discount_amount > 0 && (
+                          <span className="text-[10px] text-emerald-600 font-medium block">
+                            Saved {formatCurrency(item.discount_amount)}
+                          </span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

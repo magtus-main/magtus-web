@@ -25,6 +25,7 @@ export default async function OrdersPage({ searchParams }) {
         organization:organizations!organization_id(id, name, city, state, address),
         order_items(
           id, quantity, unit_price, total_price, product_name, variant_details,
+          ordered_unit, pcs_per_box, total_pcs, discount_percentage, discount_amount, applied_offer_details,
           product:products(id, name, name_hi)
         )`
       )

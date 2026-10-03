@@ -35,11 +35,11 @@ function formatDate(dateStr) {
   if (!dateStr) return "—";
   try {
     const d = new Date(dateStr);
-    return d.toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    if (isNaN(d.getTime())) return "—";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
   } catch {
     return String(dateStr);
   }
@@ -295,13 +295,26 @@ export async function generateOrderPdf(order) {
 
       const skuText = item.sku || item.variant_details?.sku || "";
 
+      let variantDisplay = variantText;
+      if (skuText) variantDisplay += ` (SKU: ${skuText})`;
+      if (item.discount_percentage > 0 || item.applied_offer_details) {
+        const offerLabel = item.applied_offer_details?.tierLabel || `${item.discount_percentage}% Off`;
+        variantDisplay += `\n[Promo: ${offerLabel}]`;
+      }
+
+      // Format Qty label
+      const isBox = item.ordered_unit === "box";
+      const totalPcs = item.total_pcs || (isBox ? (item.quantity * (item.pcs_per_box || 1)) : item.quantity);
+      const qtyText = isBox 
+        ? `${item.quantity || 1} Box${item.quantity > 1 ? 'es' : ''}\n(${totalPcs} pcs)`
+        : `${item.quantity || 1} pcs`;
+
       // Calculate wrapped text to determine dynamic row height
       const descLines = doc.splitTextToSize(productName, colWidths.desc - 6);
-      const variantLines = skuText
-        ? doc.splitTextToSize(`${variantText} (SKU: ${skuText})`, colWidths.variant - 4)
-        : doc.splitTextToSize(variantText, colWidths.variant - 4);
+      const variantLines = doc.splitTextToSize(variantDisplay, colWidths.variant - 4);
+      const qtyLines = doc.splitTextToSize(qtyText, colWidths.qty - 2);
 
-      const maxTextLines = Math.max(descLines.length, variantLines.length, 1);
+      const maxTextLines = Math.max(descLines.length, variantLines.length, qtyLines.length, 1);
       const rowHeight = Math.max(9, maxTextLines * 4.2 + 4);
 
       // Check for Page Overflow
@@ -342,9 +355,9 @@ export async function generateOrderPdf(order) {
 
       // Qty
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
+      doc.setFontSize(8);
       doc.setTextColor(...TEXT_DARK);
-      doc.text(String(item.quantity || 1), colX.qty + colWidths.qty / 2, currentY + 5.5, { align: "center" });
+      doc.text(qtyLines, colX.qty + colWidths.qty / 2, currentY + 5.5, { align: "center" });
 
       // Unit Rate
       doc.setFont("helvetica", "normal");
