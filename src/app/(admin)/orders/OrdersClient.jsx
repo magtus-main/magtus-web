@@ -822,12 +822,12 @@ export default function OrdersClient({ initialOrders, initialCount, initialSelec
                         </TableCell>
                         <TableCell className="text-right font-medium">
                           {formatCurrency(item.unit_price)}
-                          {item.ordered_unit === 'box' && (
+                          {(item.ordered_unit === 'box' || item.ordered_unit === 'boxes') && (
                             <span className="text-[10px] text-gray-400 block">per box</span>
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          {item.ordered_unit === 'box' ? (
+                          {(item.ordered_unit === 'box' || item.ordered_unit === 'boxes') ? (
                             <div>
                               <span className="font-bold text-gray-900 text-sm">
                                 {item.quantity} Box{item.quantity > 1 ? 'es' : ''}

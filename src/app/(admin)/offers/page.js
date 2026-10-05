@@ -32,16 +32,23 @@ export default async function OffersPage() {
     .select('id, name')
     .order('name');
 
+  // Fetch subcategories for targeting
+  const { data: subcategories } = await supabase
+    .from('subcategories')
+    .select('id, name, category_id')
+    .order('name');
+
   // Fetch products for targeting
   const { data: products } = await supabase
     .from('products')
-    .select('id, name, sku, category_id')
+    .select('id, name, sku, category_id, subcategory_id')
     .order('name');
 
   return (
     <OffersClient
       initialOffers={offers}
       categories={categories || []}
+      subcategories={subcategories || []}
       products={products || []}
       profile={profile}
       orgMember={orgMember}

@@ -303,7 +303,7 @@ export async function generateOrderPdf(order) {
       }
 
       // Format Qty label
-      const isBox = item.ordered_unit === "box";
+      const isBox = item.ordered_unit === "box" || item.ordered_unit === "boxes";
       const totalPcs = item.total_pcs || (isBox ? (item.quantity * (item.pcs_per_box || 1)) : item.quantity);
       const qtyText = isBox 
         ? `${item.quantity || 1} Box${item.quantity > 1 ? 'es' : ''}\n(${totalPcs} pcs)`
