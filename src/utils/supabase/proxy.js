@@ -37,7 +37,13 @@ export const updateSession = async (request) => {
   const isAuthPage = request.nextUrl.pathname.startsWith('/magtus-login');
   const isPublicHome = request.nextUrl.pathname === '/';
   const isPrivacyPolicy = request.nextUrl.pathname.startsWith('/privacy-policy');
-  
+  const isApiRoute = request.nextUrl.pathname.startsWith('/api');
+
+  // API routes manage their own authentication and must not be redirected
+  if (isApiRoute) {
+    return supabaseResponse;
+  }
+
   // If not logged in and not on login page or public home or privacy policy, redirect to login
   if (!user && !isAuthPage && !isPublicHome && !isPrivacyPolicy) {
     const url = request.nextUrl.clone();
