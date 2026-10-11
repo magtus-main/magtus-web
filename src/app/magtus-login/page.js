@@ -37,12 +37,16 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('send-otp', {
-        body: { phone },
+      const res = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
       });
+      const data = await res.json().catch(() => ({}));
 
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Failed to send OTP.");
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "Failed to send OTP.");
+      }
 
       setOtpHash(data.otpHash);
       setStep(2);
@@ -61,12 +65,16 @@ export default function LoginPage() {
     let isSuccess = false;
 
     try {
-      const { data, error } = await supabase.functions.invoke('verify-otp', {
-        body: { phone, otp, otpHash },
+      const res = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, otp, otpHash }),
       });
+      const data = await res.json().catch(() => ({}));
 
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Verification failed");
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "Verification failed");
+      }
 
       // Complete sign-in using magic link token
       if (data.token_hash && data.email) {
