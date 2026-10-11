@@ -16,7 +16,7 @@ export default function ProductForm({
   customFields, setCustomFields,
   finishImages, setFinishImages,
   priceMatrix, setPriceMatrix,
-  onSave, onCancel, isLoading,
+  onSave, onCancel, onDelete, isLoading,
   handleTranslate,
   defaultDpPercentage = 20,
   defaultGstPercentage = 18,
@@ -192,7 +192,21 @@ export default function ProductForm({
               {/* Core Information */}
               <div className="lg:col-span-8">
                 <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm h-full space-y-5">
-                  <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Core Information</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Core Information</h3>
+                    {editingProductId && onDelete && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={onDelete}
+                        className="text-red-600 hover:bg-red-50 hover:text-red-700 text-xs h-7 font-medium"
+                        disabled={isLoading}
+                      >
+                        <Trash2 size={13} className="mr-1.5" /> Delete Product
+                      </Button>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div className="space-y-1.5">
                       <Label className="font-semibold text-gray-700 text-sm">Product Name <span className="text-red-500">*</span></Label>
@@ -571,6 +585,17 @@ export default function ProductForm({
             <Save size={14} className="mr-2" /> {isLoading ? "Saving..." : "Save Product"}
           </Button>
           <Button variant="outline" onClick={onCancel} className="text-gray-600">Cancel</Button>
+          {editingProductId && onDelete && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onDelete}
+              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-300 ml-1"
+              disabled={isLoading}
+            >
+              <Trash2 size={14} className="mr-2" /> Delete Product
+            </Button>
+          )}
         </div>
         <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md">
           <button onClick={() => setActiveSection("details")}

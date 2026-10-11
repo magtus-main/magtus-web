@@ -261,7 +261,7 @@ export async function generateOrderPdf(order) {
 
     doc.text("#", colX.index + colWidths.index / 2, currentY + 5.2, { align: "center" });
     doc.text("ITEM DESCRIPTION", colX.desc + 3, currentY + 5.2);
-    doc.text("VARIANT / SKU", colX.variant + 2, currentY + 5.2);
+    doc.text("VARIANT", colX.variant + 2, currentY + 5.2);
     doc.text("QTY", colX.qty + colWidths.qty / 2, currentY + 5.2, { align: "center" });
     doc.text("RATE", colX.rate + colWidths.rate - 3, currentY + 5.2, { align: "right" });
     doc.text("TOTAL", colX.amount + colWidths.amount - 3, currentY + 5.2, { align: "right" });
@@ -293,14 +293,7 @@ export async function generateOrderPdf(order) {
           ? `${item.variant_details.finish} - ${item.variant_details.size}`
           : item.variant_details?.finish || item.variant_details?.size || "—");
 
-      const skuText = item.sku || item.variant_details?.sku || "";
-
       let variantDisplay = variantText;
-      if (skuText) variantDisplay += ` (SKU: ${skuText})`;
-      if (item.discount_percentage > 0 || item.applied_offer_details) {
-        const offerLabel = item.applied_offer_details?.tierLabel || `${item.discount_percentage}% Off`;
-        variantDisplay += `\n[Promo: ${offerLabel}]`;
-      }
 
       // Format Qty label
       const isBox = item.ordered_unit === "box" || item.ordered_unit === "boxes";
@@ -390,20 +383,6 @@ export async function generateOrderPdf(order) {
   const rightTotalsWidth = 70;
   const rightTotalsX = margin + contentWidth - rightTotalsWidth;
 
-  // Left Side: Notes
-  if (order.notes) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.setTextColor(...PRIMARY);
-    doc.text("ORDER INSTRUCTIONS & NOTES:", margin, summaryStartY + 4);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(...TEXT_DARK);
-    const wrappedNotes = doc.splitTextToSize(order.notes, leftNotesWidth - 6);
-    doc.text(wrappedNotes.slice(0, 4), margin, summaryStartY + 9);
-  }
-
   // Financial Breakdown
   const orderSubtotal = Number(order.subtotal) || (items.reduce((s, it) => s + (Number(it.total_price) || 0), 0)) || Number(order.total) || 0;
   const orderDiscount = Number(order.discount) || (items.reduce((s, it) => s + (Number(it.discount_amount) || 0), 0)) || 0;
@@ -413,6 +392,53 @@ export async function generateOrderPdf(order) {
   const grandTotal = Number(order.total) || Math.round((taxableSubtotal + taxAmount) * 100) / 100;
   const hasDiscount = orderDiscount > 0;
   const totalsCardHeight = hasDiscount ? 42 : 35;
+
+  // Left Side: Notes & Instructions Card
+  const notesCardWidth = leftNotesWidth - 4;
+  if (order.notes) {
+    doc.setFillColor(...BG_LIGHT);
+    doc.setDrawColor(...BORDER_COLOR);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(margin, summaryStartY, notesCardWidth, totalsCardHeight, 2, 2, "FD");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...PRIMARY);
+    doc.text("ORDER INSTRUCTIONS & NOTES", margin + 4, summaryStartY + 5.5);
+
+    // Clean notes for PDF:
+    // 1. Remove offer names from [Applied Offers: ...], keeping only details like "3 flat discount + 5% Off"
+    // 2. Remove Unicode rupee symbol (₹) and non-standard characters that break jsPDF Helvetica metrics
+    let cleanedNotes = String(order.notes || "");
+    cleanedNotes = cleanedNotes.replace(/\[Applied Offers?:\s*([^\]]+)\]/gi, (_, content) => {
+      const details = content
+        .split(/,\s*(?=[A-Za-z0-9])/)
+        .map((item) => {
+          let trimmed = item.trim();
+          // Remove offer name before " - " (e.g. "CASH PAYMENT - 3 flat discount" -> "3 flat discount")
+          trimmed = trimmed.replace(/^[^-(]+[-–—]\s*/, "");
+          // Remove offer name before " (details)" (e.g. "Offer Name (5% Off)" -> "5% Off")
+          trimmed = trimmed.replace(/^[^-(]+\(([^)]+)\)/, "$1");
+          return trimmed;
+        })
+        .join(" + ");
+      return `[Offer: ${details}]`;
+    });
+
+    cleanedNotes = cleanedNotes
+      .replace(/₹\s*/g, "")
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .trim();
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...TEXT_DARK);
+    const wrappedNotes = doc.splitTextToSize(cleanedNotes, notesCardWidth - 8);
+    // Limit to max lines that fit within card without overflowing below
+    const maxLines = hasDiscount ? 7 : 5;
+    doc.text(wrappedNotes.slice(0, maxLines), margin + 4, summaryStartY + 10.5);
+  }
 
   // Right Side: Totals Card
   doc.setFillColor(...BG_LIGHT);

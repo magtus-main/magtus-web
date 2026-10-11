@@ -14,7 +14,7 @@ async function getDashboardData() {
     { count: totalUsers },
     { count: totalDealers },
     { count: totalCarpenters },
-    { count: totalProducts },
+    productsData,
     { count: totalOrders },
     { count: pendingOrders },
     { count: totalQRCodes },
@@ -28,7 +28,7 @@ async function getDashboardData() {
     supabase.from('profiles').select('*', { count: 'exact', head: true }),
     supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'dealer'),
     supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'carpenter'),
-    supabase.from('products').select('*', { count: 'exact', head: true }),
+    supabase.from('products').select('id, is_deleted'),
     supabase.from('orders').select('*', { count: 'exact', head: true }),
     supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
     supabase.from('qr_codes').select('*', { count: 'exact', head: true }),
@@ -43,6 +43,7 @@ async function getDashboardData() {
       .limit(5),
   ]);
 
+  const totalProducts = (productsData?.data || []).filter(p => p.is_deleted !== true).length;
   const totalRevenue = (revenueData.data || []).reduce((sum, o) => sum + (o.total || 0), 0);
   const totalPointsIssued = (pointsData.data || []).reduce((sum, p) => sum + (p.total_points || 0), 0);
 

@@ -31,7 +31,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
   const hasEditPermission = hasModulePermission(profile, orgMember, "products", "edit");
   const [activeTab, setActiveTab] = useState("all-products");
 
-  const [products, setProducts] = useState(initialProducts || []);
+  const [products, setProducts] = useState((initialProducts || []).filter(p => p.is_deleted !== true));
   const [categories, setCategories] = useState(initialCategories || []);
   const [subcategories, setSubcategories] = useState(initialSubcategories || []);
 
@@ -146,10 +146,10 @@ export default function ProductClient({ initialProducts, initialCategories, init
     setProductImages(existingImgs.sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0)));
 
 
-    // Load specifications JSONB
+    // Load specifications JSONB (filter out soft-deleted variants for editing)
     const specs = product.specifications || {};
     setCustomFields(specs.customFields || {});
-    setPriceMatrix(specs.priceMatrix || []);
+    setPriceMatrix((specs.priceMatrix || []).filter(v => v.is_deleted !== true));
     setFinishImages(specs.finishImages || {});
 
     setActiveTab("add-edit-product");
@@ -243,19 +243,37 @@ export default function ProductClient({ initialProducts, initialCategories, init
           hsn_code: (productForm.hsn_code || "").trim(),
           pcs_per_box: parseInt(productForm.pcs_per_box) || 1,
           allow_loose_pcs: productForm.allow_loose_pcs ?? true,
-          priceMatrix: priceMatrix.map(m => {
-            const { _dpAuto, ...cleanM } = m;
-            return {
-              ...cleanM,
-              mrp: parseFloat(m.mrp) || 0,
-              dealer_price: parseFloat(m.dealer_price) || 0,
-              reward_points: parseInt(m.reward_points) || 0,
-              stock: parseInt(m.stock) || 0,
-              min_stock: parseInt(m.min_stock) || 5,
-              pcs_per_box: parseInt(m.pcs_per_box) || parseInt(productForm.pcs_per_box) || 1,
-              sku: `${baseSku}-${(m.finish || '').replace(/\s+/g, '').toUpperCase()}-${(m.size || '').replace(/\s+/g, '').toUpperCase()}`
-            };
-          }),
+          priceMatrix: (() => {
+            const activeMatrix = priceMatrix.filter(v => v.is_deleted !== true).map(m => {
+              const { _dpAuto, ...cleanM } = m;
+              return {
+                ...cleanM,
+                mrp: parseFloat(m.mrp) || 0,
+                dealer_price: parseFloat(m.dealer_price) || 0,
+                reward_points: parseInt(m.reward_points) || 0,
+                stock: parseInt(m.stock) || 0,
+                min_stock: parseInt(m.min_stock) || 5,
+                pcs_per_box: parseInt(m.pcs_per_box) || parseInt(productForm.pcs_per_box) || 1,
+                sku: `${baseSku}-${(m.finish || '').replace(/\s+/g, '').toUpperCase()}-${(m.size || '').replace(/\s+/g, '').toUpperCase()}`,
+                is_deleted: false,
+              };
+            });
+            let missingOrDeleted = [];
+            if (productId) {
+              const currentProd = products.find(p => p.id === productId);
+              const origMatrix = currentProd?.specifications?.priceMatrix || [];
+              missingOrDeleted = origMatrix
+                .filter(oldV => {
+                  const stillPresent = activeMatrix.some(newV =>
+                    (oldV.sku && newV.sku && oldV.sku === newV.sku) ||
+                    (oldV.finish === newV.finish && oldV.size === newV.size)
+                  );
+                  return !stillPresent || oldV.is_deleted === true;
+                })
+                .map(oldV => ({ ...oldV, is_deleted: true }));
+            }
+            return [...activeMatrix, ...missingOrDeleted];
+          })(),
         },
       };
 
@@ -345,18 +363,101 @@ export default function ProductClient({ initialProducts, initialCategories, init
   };
 
   const handleDeleteProduct = (id) => {
+    const prod = products.find(p => p.id === id);
+    const prodName = prod?.name || "this product";
+
     confirmAction(
       "Delete Product",
-      "Are you sure you want to delete this product? This action cannot be undone.",
+      `Are you sure you want to delete "${prodName}"? It will be removed from products and hidden across the app while keeping order history healthy.`,
       async () => {
         try {
           setLoading(true);
-          await supabase.from('products').delete().eq('id', id);
-          setProducts(products.filter(p => p.id !== id));
-          toast.success("Product deleted successfully");
+
+          // Soft delete: flag is_deleted = true and is_active = false
+          // Keep product row & product images intact so existing orders, order_items, and receipts stay healthy
+          const { error } = await supabase
+            .from('products')
+            .update({ is_deleted: true, is_active: false })
+            .eq('id', id);
+
+          if (error) throw error;
+
+          setProducts(prev => prev.filter(p => p.id !== id));
+          toast.success(`Product "${prodName}" deleted successfully`);
+
+          if (editingProductId === id) {
+            resetProductFormState();
+            setActiveTab("all-products");
+          }
         } catch (err) {
-          console.error(err);
-          toast.error("Failed to delete product");
+          console.error("Delete product error:", err);
+          toast.error(err.message || "Failed to delete product");
+        } finally {
+          setLoading(false);
+        }
+      },
+      "destructive"
+    );
+  };
+
+  const handleDeleteVariant = (product, variant, matrixIndex) => {
+    const variantLabel = [variant.finish, variant.size].filter(Boolean).join(" - ") || variant.sku || "this variant";
+
+    confirmAction(
+      "Delete Variant",
+      `Are you sure you want to remove variant "${variantLabel}" from "${product.name}"?`,
+      async () => {
+        try {
+          setLoading(true);
+          const currentProduct = products.find(p => p.id === product.id) || product;
+          const currentMatrix = currentProduct.specifications?.priceMatrix || [];
+
+          // Soft delete: mark is_deleted = true on this variant to protect order history
+          const updatedMatrix = currentMatrix.map((m, idx) => {
+            const isMatch = (idx === matrixIndex) ||
+              (variant.sku && m.sku && m.sku === variant.sku) ||
+              (m.finish === variant.finish && m.size === variant.size);
+            if (isMatch) {
+              return { ...m, is_deleted: true };
+            }
+            return m;
+          });
+
+          const updatedSpecs = {
+            ...(currentProduct.specifications || {}),
+            priceMatrix: updatedMatrix,
+          };
+
+          const { error } = await supabase
+            .from('products')
+            .update({ specifications: updatedSpecs })
+            .eq('id', currentProduct.id);
+
+          if (error) throw error;
+
+          // Update local state
+          setProducts(prev => prev.map(p => {
+            if (p.id === currentProduct.id) {
+              return {
+                ...p,
+                specifications: updatedSpecs,
+              };
+            }
+            return p;
+          }));
+
+          // If currently editing this product, sync priceMatrix in form too (remove soft-deleted)
+          if (editingProductId === currentProduct.id) {
+            setPriceMatrix(prev => prev.filter(m => !(
+              (variant.sku && m.sku && m.sku === variant.sku) ||
+              (m.finish === variant.finish && m.size === variant.size)
+            )));
+          }
+
+          toast.success(`Variant "${variantLabel}" removed successfully`);
+        } catch (err) {
+          console.error("Delete variant error:", err);
+          toast.error(err.message || "Failed to remove variant");
         } finally {
           setLoading(false);
         }
@@ -483,13 +584,14 @@ export default function ProductClient({ initialProducts, initialCategories, init
       supabase.from('categories').select('*').order('name'),
       supabase.from('subcategories').select('*, categories (id, name)').order('name')
     ]);
-    if (prodRes.data) setProducts(prodRes.data);
+    if (prodRes.data) setProducts(prodRes.data.filter(p => p.is_deleted !== true));
     if (catRes.data) setCategories(catRes.data);
     if (subcatRes.data) setSubcategories(subcatRes.data);
     router.refresh();
   };
 
   const filteredProducts = products
+    .filter(p => p.is_deleted !== true)
     .filter(p => {
       const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.categories?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -510,7 +612,8 @@ export default function ProductClient({ initialProducts, initialCategories, init
 
   const flattenedVariants = [];
   filteredProducts.forEach(product => {
-    const pm = product.specifications?.priceMatrix || [];
+    const rawMatrix = product.specifications?.priceMatrix || [];
+    const pm = rawMatrix.filter(v => v.is_deleted !== true);
     if (pm.length === 0) {
       flattenedVariants.push({ ...product, isVariant: false, variant: null });
     } else {
@@ -680,10 +783,22 @@ export default function ProductClient({ initialProducts, initialCategories, init
                         <TableCell className="text-right">
                           {hasEditPermission ? (
                             <div className="flex justify-end gap-2" onClick={e => e.stopPropagation()}>
-                              <Button variant="ghost" size="icon" onClick={() => handleEditProduct(item)}>
+                              <Button variant="ghost" size="icon" onClick={() => handleEditProduct(item)} title="Edit Product">
                                 <Edit2 size={16} className="text-gray-600" />
                               </Button>
-                              <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleDeleteProduct(item.id); }}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isVariant) {
+                                    handleDeleteVariant(item, variant, item.matrixIndex);
+                                  } else {
+                                    handleDeleteProduct(item.id);
+                                  }
+                                }}
+                                title={isVariant ? "Delete Variant" : "Delete Product"}
+                              >
                                 <Trash2 size={16} className="text-red-500" />
                               </Button>
                             </div>
@@ -728,6 +843,7 @@ export default function ProductClient({ initialProducts, initialCategories, init
               setPriceMatrix={setPriceMatrix}
               onSave={handleSaveProduct}
               onCancel={handleCancelEdit}
+              onDelete={editingProductId ? () => handleDeleteProduct(editingProductId) : undefined}
               isLoading={isLoading}
               handleTranslate={handleTranslate}
               defaultDpPercentage={defaultDpPercentage}

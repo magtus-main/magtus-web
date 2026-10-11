@@ -41,15 +41,17 @@ export default async function OffersPage() {
   // Fetch products for targeting
   const { data: products } = await supabase
     .from('products')
-    .select('id, name, sku, category_id, subcategory_id')
+    .select('id, name, sku, category_id, subcategory_id, is_deleted')
     .order('name');
+
+  const activeProducts = (products || []).filter(p => p.is_deleted !== true);
 
   return (
     <OffersClient
       initialOffers={offers}
       categories={categories || []}
       subcategories={subcategories || []}
-      products={products || []}
+      products={activeProducts}
       profile={profile}
       orgMember={orgMember}
     />

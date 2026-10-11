@@ -15,9 +15,11 @@ export default async function QRCodesPage() {
   // Fetch products for the dropdown
   const { data: products } = await supabase
     .from("products")
-    .select("id, name, reward_points, specifications")
+    .select("id, name, reward_points, specifications, is_deleted")
     .eq("is_active", true)
     .order("name");
+
+  const activeProducts = (products || []).filter(p => p.is_deleted !== true);
 
   // Fetch initial QR codes
   const { data: qrCodes, count } = await supabase
@@ -31,7 +33,7 @@ export default async function QRCodesPage() {
 
   return (
     <QRCodesClient
-      initialProducts={products || []}
+      initialProducts={activeProducts}
       initialQRCodes={qrCodes || []}
       initialCount={count || 0}
       profile={profile}

@@ -53,9 +53,11 @@ export default async function ProductsPage() {
   const defaultDpPercentage = parseFloat(settingsMap.default_dp_percentage) || 20;
   const defaultGstPercentage = parseFloat(settingsMap.tax_percentage ?? settingsMap.gst_percentage) || 18;
 
+  const activeProducts = (products || []).filter(p => p.is_deleted !== true);
+
   return (
     <ProductClient
-      initialProducts={products || []}
+      initialProducts={activeProducts}
       initialCategories={categories || []}
       initialSubcategories={subcategories || []}
       profile={profile}
