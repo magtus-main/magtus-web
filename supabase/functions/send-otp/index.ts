@@ -58,7 +58,7 @@ export default {
         // Meta WhatsApp Cloud API credentials
         const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN') || Deno.env.get('META_WHATSAPP_TOKEN')
         const phoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')
-        const templateName = Deno.env.get('WHATSAPP_TEMPLATE_NAME') || 'yoursites_auth'
+        const templateName = Deno.env.get('WHATSAPP_TEMPLATE_NAME') || 'magtus_otp'
         const templateLang = Deno.env.get('WHATSAPP_TEMPLATE_LANG') || 'en'
         const apiVersion = Deno.env.get('WHATSAPP_API_VERSION') || 'v21.0'
         const buttonType = Deno.env.get('WHATSAPP_BUTTON_TYPE') || 'url' // 'none', 'url', or 'copy_code'

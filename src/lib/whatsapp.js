@@ -6,7 +6,7 @@
 
 // WhatsApp Configuration Constants (non-secret constants)
 export const WHATSAPP_CONFIG = {
-  TEMPLATE_NAME: "yoursites_auth",
+  TEMPLATE_NAME: "magtus_otp",
   TEMPLATE_LANG: "en",
   BUTTON_TYPE: "url",
   API_VERSION: "v21.0",
@@ -35,7 +35,7 @@ export function formatPhoneNumber(phone) {
 /**
  * Send a template message to a single recipient
  * @param {string} to - Phone number with or without country code
- * @param {string} templateName - Pre-approved template name (e.g. 'yoursites_auth')
+ * @param {string} templateName - Pre-approved template name (e.g. 'magtus_otp')
  * @param {string} languageCode - e.g. 'en'
  * @param {Array} components - Template components (body, button params)
  * @returns {Promise<object>} - { messageId, status }
@@ -75,9 +75,12 @@ export async function sendTemplateMessage(to, templateName, languageCode = "en",
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok || data?.error) {
-    const errMsg = data?.error?.message || data?.error?.error_data?.details || response.statusText;
-    console.error("[whatsapp.js] Meta API error:", JSON.stringify(data));
-    throw new Error(`WhatsApp API Error: ${errMsg}`);
+    const errorMsg = data?.error?.message || response.statusText;
+    const details = data?.error?.error_data?.details;
+    const fullMsg = details ? `${errorMsg} (Details: ${details})` : errorMsg;
+    console.error("[whatsapp.js] Meta API error:", JSON.stringify(data, null, 2));
+    console.error("[whatsapp.js] Sent payload:", JSON.stringify(body, null, 2));
+    throw new Error(`WhatsApp API Error: ${fullMsg}`);
   }
 
   return {
@@ -88,7 +91,7 @@ export async function sendTemplateMessage(to, templateName, languageCode = "en",
 }
 
 /**
- * Send WhatsApp OTP using template (default: 'yoursites_auth')
+ * Send WhatsApp OTP using template (default: 'magtus_otp')
  * Format matches the multitenate sample: body text parameter + url button parameter
  */
 export async function sendWhatsAppOTP({ phone, otp, templateName, languageCode }) {
