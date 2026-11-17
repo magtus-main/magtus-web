@@ -55,6 +55,8 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
   const [totalCount, setTotalCount] = useState(initialCount || 0);
   const [currentPage, setCurrentPage] = useState(1);
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterPrint, setFilterPrint] = useState("all"); // "all", "unprinted", "printed", "reprinted"
+  const [filterProduct, setFilterProduct] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Generate form
@@ -67,6 +69,9 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
 
   // PDF Export modal
   const [showPdfModal, setShowPdfModal] = useState(false);
+  const [exportScope, setExportScope] = useState("unprinted"); // "unprinted", "filtered", "product", "batch"
+  const [exportBatchId, setExportBatchId] = useState("");
+  const [exportProductId, setExportProductId] = useState("");
   const [stickerPreset, setStickerPreset] = useState(1); // default Medium
   const [customWidth, setCustomWidth] = useState("");
   const [customHeight, setCustomHeight] = useState("");
@@ -116,6 +121,18 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         query = query.eq("status", filterStatus);
       }
 
+      if (filterPrint === "unprinted") {
+        query = query.or("print_count.is.null,print_count.eq.0");
+      } else if (filterPrint === "printed") {
+        query = query.gte("print_count", 1);
+      } else if (filterPrint === "reprinted") {
+        query = query.gt("print_count", 1);
+      }
+
+      if (filterProduct) {
+        query = query.eq("product_id", filterProduct);
+      }
+
       if (searchQuery.trim()) {
         query = query.or(`code.ilike.%${searchQuery}%,batch_label.ilike.%${searchQuery}%`);
       }
@@ -129,7 +146,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
     } finally {
       setLoading(false);
     }
-  }, [currentPage, filterStatus, searchQuery]);
+  }, [currentPage, filterStatus, filterPrint, filterProduct, searchQuery]);
 
   useEffect(() => {
     fetchQRCodes();
@@ -157,6 +174,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
           reward_points: points,
           batch_label: batchId,
           status: "available",
+          print_count: 0,
         });
       }
 
@@ -253,12 +271,29 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         return;
       }
 
-      // Fetch all available QR codes matching current filters
+      // Fetch QR codes based on selected scope
       let query = supabase
         .from("qr_codes")
         .select(`*, product:products(name, specifications)`)
         .eq("status", "available")
         .order("created_at", { ascending: false });
+
+      if (exportScope === "unprinted") {
+        query = query.or("print_count.is.null,print_count.eq.0");
+      } else if (exportScope === "product" && exportProductId) {
+        query = query.eq("product_id", exportProductId);
+      } else if (exportScope === "batch" && exportBatchId) {
+        query = query.eq("batch_label", exportBatchId);
+      } else if (exportScope === "filtered") {
+        if (filterPrint === "unprinted") {
+          query = query.or("print_count.is.null,print_count.eq.0");
+        } else if (filterPrint === "printed") {
+          query = query.gte("print_count", 1);
+        } else if (filterPrint === "reprinted") {
+          query = query.gt("print_count", 1);
+        }
+        if (filterProduct) query = query.eq("product_id", filterProduct);
+      }
 
       if (searchQuery.trim()) {
         query = query.or(`code.ilike.%${searchQuery}%,batch_label.ilike.%${searchQuery}%`);
@@ -268,10 +303,22 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
       if (error) throw error;
 
       if (!allQRCodes || allQRCodes.length === 0) {
-        toast.error("No available QR codes found to export.");
+        toast.error("No available QR codes found matching the selected print scope.");
         setPdfExporting(false);
         return;
       }
+
+      // Helper to extract clean labels
+      const getQRLabelInfo = (qr) => {
+        const isReprint = (qr.print_count || 0) >= 1;
+        const stamp = isReprint ? "[D]" : "[O]";
+        const prodName = (qr.product?.name || "MAGTUS").toUpperCase();
+        const truncatedProd = prodName.length > 20 ? prodName.slice(0, 18) + "..." : prodName;
+        const rawSku = qr.sku ? qr.sku.replace(/^SKU-/, "") : "";
+        const truncatedVariant = rawSku.length > 20 ? rawSku.slice(0, 18) + "..." : rawSku;
+        const ptsText = qr.reward_points ? `${qr.reward_points} PTS` : "";
+        return { isReprint, stamp, prodName, truncatedProd, truncatedVariant, ptsText };
+      };
 
       // 1. ROLL FORMAT: 4-Across Roll PDF (100x25mm rows)
       if (exportFormat === "roll") {
@@ -292,6 +339,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
             const qrIdx = i + col;
             if (qrIdx < allQRCodes.length) {
               const qr = allQRCodes[qrIdx];
+              const { stamp, truncatedProd, truncatedVariant, ptsText } = getQRLabelInfo(qr);
 
               // Generate QR code as data URL
               const qrDataUrl = await QRCode.toDataURL(qr.code, {
@@ -300,21 +348,32 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
                 errorCorrectionLevel: "M",
               });
 
-              // Centering calculations:
-              // Column width = 25mm. Centered QR Code bounding box.
-              // If includeTextLabel is true: qrSize = 16x16mm, centered horizontally, shifted up to y = 3.0mm.
-              // This leaves a 2.5mm horizontal margin (at col*25 + 4.5) and fits everything in the 20x20mm bounding box.
-              const qrSize = includeTextLabel ? 16 : 20;
-              const qrX = col * 25 + (25 - qrSize) / 2;
-              const qrY = includeTextLabel ? 3.0 : 2.5;
-
-              doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
-
               if (includeTextLabel) {
-                // Centered at x = col * 25 + 12.5, y = 21.8 (within 20x20mm print area limit)
+                // Line 1: Product Name at top (y = 2.4mm)
                 doc.setFont("helvetica", "bold");
-                doc.setFontSize(4.2); // sharp, clear 4pt font
-                doc.text(qr.code, col * 25 + 12.5, 21.8, { align: "center" });
+                doc.setFontSize(3.8);
+                doc.text(truncatedProd, col * 25 + 12.5, 2.4, { align: "center" });
+
+                // Line 2: Variant & Points (y = 4.0mm)
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(3.2);
+                const subLine = [truncatedVariant, ptsText].filter(Boolean).join(" · ");
+                doc.text(subLine || "HARDWARE", col * 25 + 12.5, 4.0, { align: "center" });
+
+                // QR Code (centered horizontally, y = 4.8 to 19.8mm)
+                const qrSize = 15;
+                const qrX = col * 25 + (25 - qrSize) / 2;
+                doc.addImage(qrDataUrl, "PNG", qrX, 4.8, qrSize, qrSize);
+
+                // Line 3: Code + Stamp [O] or [D] (y = 22.4mm)
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(4.2);
+                doc.text(`${qr.code}  ${stamp}`, col * 25 + 12.5, 22.4, { align: "center" });
+              } else {
+                // Centered large QR without text
+                const qrSize = 20;
+                const qrX = col * 25 + (25 - qrSize) / 2;
+                doc.addImage(qrDataUrl, "PNG", qrX, 2.5, qrSize, qrSize);
               }
             }
           }
@@ -328,9 +387,6 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         a.download = `qr_roll_4across_${new Date().toISOString().slice(0, 10)}.pdf`;
         a.click();
         URL.revokeObjectURL(url);
-
-        toast.success(`Exported ${allQRCodes.length} QR codes in 4-Across Roll PDF!`);
-        setShowPdfModal(false);
       } 
       
       // 2. A4 GRID FORMAT: Lays out stickers in grid on A4 sheet
@@ -341,19 +397,17 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
           format: "a4",
         });
 
-        const labelH = includeTextLabel ? (stickerW >= 38 ? 6 : 5) : 0;
+        const labelH = includeTextLabel ? (stickerW >= 38 ? 8 : 6) : 0;
         const cellW = stickerW;
         const cellH = stickerH + labelH;
         const gap = 2; // spacing between stickers
 
-        // Margins and printable grid size
         const marginX = 10;
         const marginY = 10;
         const colsCount = Math.max(1, Math.floor((210 - 2 * marginX + gap) / (cellW + gap)));
         const rowsCount = Math.max(1, Math.floor((297 - 2 * marginY + gap) / (cellH + gap)));
         const perPage = colsCount * rowsCount;
 
-        // Auto-center grid inside A4 page dimensions
         const totalGridW = colsCount * cellW + (colsCount - 1) * gap;
         const totalGridH = rowsCount * cellH + (rowsCount - 1) * gap;
         const startX = (210 - totalGridW) / 2;
@@ -374,6 +428,8 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
           const yOffset = startY + rowIdx * (cellH + gap);
 
           const qr = allQRCodes[i];
+          const { stamp, truncatedProd, truncatedVariant, ptsText } = getQRLabelInfo(qr);
+
           const qrDataUrl = await QRCode.toDataURL(qr.code, {
             width: 400,
             margin: 1,
@@ -381,18 +437,29 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
           });
 
           if (includeTextLabel) {
-            const qrImgSize = Math.min(stickerW, stickerH) - 4;
+            // Product Name header
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(stickerW >= 38 ? 6 : 4.5);
+            doc.text(truncatedProd, xOffset + stickerW / 2, yOffset + 2.8, { align: "center" });
+
+            // QR Image
+            const qrImgSize = Math.min(stickerW, stickerH) - 6;
             const qrX = xOffset + (stickerW - qrImgSize) / 2;
-            const qrY = yOffset + 1.5;
+            const qrY = yOffset + 3.8;
             doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
 
-            const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 5;
-            const textX = xOffset + stickerW / 2;
-            const textY = yOffset + stickerH + (labelH / 2) + 0.5;
-
+            // Bottom Code & Stamp
+            const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 4.8;
             doc.setFont("helvetica", "bold");
             doc.setFontSize(idFontSize);
-            doc.text(qr.code, textX, textY, { align: "center" });
+            doc.text(`${qr.code}  ${stamp}`, xOffset + stickerW / 2, yOffset + stickerH + 3, { align: "center" });
+
+            if (truncatedVariant || ptsText) {
+              doc.setFont("helvetica", "normal");
+              doc.setFontSize(stickerW >= 38 ? 5 : 3.8);
+              const subLine = [truncatedVariant, ptsText].filter(Boolean).join(" · ");
+              doc.text(subLine, xOffset + stickerW / 2, yOffset + stickerH + 6, { align: "center" });
+            }
           } else {
             const qrImgSize = Math.min(stickerW, stickerH) - 2;
             const qrX = xOffset + (stickerW - qrImgSize) / 2;
@@ -409,56 +476,58 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         a.download = `qr_a4_grid_${new Date().toISOString().slice(0, 10)}.pdf`;
         a.click();
         URL.revokeObjectURL(url);
-
-        toast.success(`Exported ${allQRCodes.length} QR codes in A4 Grid PDF!`);
-        setShowPdfModal(false);
       } 
       
-      // 3. ZIP FORMAT: Original Zip archive of individual label PDFs
+      // 3. ZIP FORMAT: Archive of individual label PDFs
       else if (exportFormat === "zip") {
-        const labelHeight = stickerW >= 38 ? 6 : 5;
+        const labelHeight = stickerW >= 38 ? 8 : 6;
         const totalStickerH = stickerH + labelHeight;
 
-        // Import JSZip dynamically
         const JSZip = (await import("jszip")).default;
         const zip = new JSZip();
         const qrFolder = zip.folder("qr_stickers");
 
         for (let i = 0; i < allQRCodes.length; i++) {
           const qr = allQRCodes[i];
+          const { stamp, truncatedProd, truncatedVariant, ptsText } = getQRLabelInfo(qr);
           setExportProgress(`ZIP ${i + 1}/${allQRCodes.length}...`);
 
-          // Generate QR code as data URL
           const qrDataUrl = await QRCode.toDataURL(qr.code, {
             width: 400,
             margin: 1,
             errorCorrectionLevel: "M",
           });
 
-          // Create individual PDF for this QR code matching sticker size exactly
           const doc = new jsPDF({
             orientation: "portrait",
             unit: "mm",
             format: [stickerW, totalStickerH],
           });
 
-          // Draw QR code image
-          const qrImgSize = Math.min(stickerW, stickerH) - 2;
+          // Top Header: Product Name
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(stickerW >= 38 ? 6 : 4.5);
+          doc.text(truncatedProd, stickerW / 2, 2.8, { align: "center" });
+
+          // QR Image
+          const qrImgSize = Math.min(stickerW, stickerH) - 6;
           const qrX = (stickerW - qrImgSize) / 2;
-          const qrY = 1;
+          const qrY = 3.6;
           doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrImgSize, qrImgSize);
 
-          // Set font size based on sticker width for QR ID
-          const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 5;
-          const textX = stickerW / 2;
-          const textY = stickerH + (labelHeight / 2) + 0.5;
-
-          // Draw only the QR ID so user can enter manually if they want
+          // Bottom Code + Stamp
+          const idFontSize = stickerW >= 50 ? 8 : stickerW >= 38 ? 6 : 4.8;
           doc.setFont("helvetica", "bold");
           doc.setFontSize(idFontSize);
-          doc.text(qr.code, textX, textY, { align: "center" });
+          doc.text(`${qr.code}  ${stamp}`, stickerW / 2, stickerH + 3, { align: "center" });
 
-          // Output PDF to ArrayBuffer and add to zip folder
+          if (truncatedVariant || ptsText) {
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(stickerW >= 38 ? 5 : 3.8);
+            const subLine = [truncatedVariant, ptsText].filter(Boolean).join(" · ");
+            doc.text(subLine, stickerW / 2, stickerH + 6, { align: "center" });
+          }
+
           const pdfOutput = doc.output("arraybuffer");
           const fileName = `${qr.code}.pdf`;
           qrFolder.file(fileName, pdfOutput);
@@ -466,17 +535,41 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
 
         setExportProgress("Archiving ZIP...");
         const content = await zip.generateAsync({ type: "blob" });
-
         const url = URL.createObjectURL(content);
         const a = document.createElement("a");
         a.href = url;
         a.download = `qr_stickers_${new Date().toISOString().slice(0, 10)}.zip`;
         a.click();
         URL.revokeObjectURL(url);
-
-        toast.success(`Exported ${allQRCodes.length} QR PDFs in a ZIP archive!`);
-        setShowPdfModal(false);
       }
+
+      // Update print count in Supabase after successful export
+      try {
+        setExportProgress("Updating print records...");
+        const qrIds = allQRCodes.map((q) => q.id);
+        for (let c = 0; c < qrIds.length; c += 25) {
+          const chunkIds = qrIds.slice(c, c + 25);
+          await Promise.allSettled(
+            chunkIds.map((id) => {
+              const item = allQRCodes.find((q) => q.id === id);
+              const currentCount = item?.print_count || 0;
+              return supabase
+                .from("qr_codes")
+                .update({
+                  print_count: currentCount + 1,
+                  last_printed_at: new Date().toISOString(),
+                })
+                .eq("id", id);
+            })
+          );
+        }
+      } catch (dbErr) {
+        console.warn("Could not record print_count in database:", dbErr);
+      }
+
+      toast.success(`Exported ${allQRCodes.length} stickers! Print records updated.`);
+      setShowPdfModal(false);
+      fetchQRCodes();
     } catch (err) {
       console.error("PDF export failed:", err);
       toast.error("Failed to export: " + (err.message || "Unknown error"));
@@ -593,30 +686,68 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         {/* RIGHT SIDE: INVENTORY */}
         <div className="flex flex-col flex-1 bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm h-full">
           {/* Filters */}
-          <div className="flex items-center gap-4 p-5 border-b border-gray-200 flex-shrink-0 bg-gray-50/50">
-            <div className="flex-1 relative">
+          <div className="flex flex-wrap items-center gap-3 p-4 border-b border-gray-200 flex-shrink-0 bg-gray-50/50">
+            <div className="flex-1 min-w-[200px] relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
               <Input
-                placeholder="Search QR or batch ID..."
+                placeholder="Search QR code or batch..."
                 value={searchQuery}
                 onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
                 className="pl-9 bg-white border-gray-200 h-9 focus-visible:ring-primary text-sm"
               />
             </div>
+
+            {/* Product Filter Dropdown */}
+            <select
+              value={filterProduct}
+              onChange={(e) => { setFilterProduct(e.target.value); setCurrentPage(1); }}
+              className="h-9 px-3 border border-gray-200 rounded-md text-xs bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">All Products</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+
+            {/* Print Status Filter */}
+            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md">
+              {[
+                { id: "all", label: "All" },
+                { id: "unprinted", label: "Unprinted" },
+                { id: "printed", label: "[O] Printed" },
+                { id: "reprinted", label: "[D] Reprints" },
+              ].map((fmt) => (
+                <button
+                  key={fmt.id}
+                  onClick={() => { setFilterPrint(fmt.id); setCurrentPage(1); }}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors ${
+                    filterPrint === fmt.id
+                      ? "bg-white text-primary shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {fmt.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Scan Status Filter */}
             <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md">
               {["all", "available", "scanned"].map((s) => (
                 <button
                   key={s}
                   onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
-                  className={`px-3 py-1 text-xs font-semibold rounded transition-colors capitalize ${filterStatus === s
-                    ? "bg-white text-primary shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                    }`}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors capitalize ${
+                    filterStatus === s
+                      ? "bg-white text-primary shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
                 >
                   {s}
                 </button>
               ))}
             </div>
+
             <Button variant="outline" size="icon" onClick={fetchQRCodes} className="h-9 w-9 border-gray-200 text-gray-600 bg-white">
               <RefreshCcw size={15} />
             </Button>
@@ -634,10 +765,11 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
               <TableHeader className="bg-gray-50 sticky top-0 z-10 shadow-sm">
                 <TableRow>
                   <TableHead>QR Code</TableHead>
-                  <TableHead>Product</TableHead>
+                  <TableHead>Product & Variant</TableHead>
                   <TableHead>Batch</TableHead>
                   <TableHead>Points</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Print Status</TableHead>
+                  <TableHead>Scan Status</TableHead>
                   <TableHead>Scanned By</TableHead>
                   <TableHead>Created</TableHead>
                 </TableRow>
@@ -645,17 +777,27 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
               <TableBody>
                 {qrCodes.map((qr) => {
                   const sc = getStatusConfig(qr.status);
+                  const pCount = qr.print_count || 0;
+
                   return (
                     <TableRow key={qr.id} className="hover:bg-gray-50/50">
                       <TableCell>
-                        <span className="text-sm font-mono font-medium text-gray-700">{qr.code}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-mono font-medium text-gray-800">{qr.code}</span>
+                          {pCount === 1 && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">[O]</span>
+                          )}
+                          {pCount > 1 && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">[D]</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <p className="text-sm font-semibold text-gray-800">
                           {qr.product?.name || "Unknown Product"}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          {qr.sku ? `SKU: ${qr.sku}` : "No Variant"}
+                        <p className="text-xs text-gray-500 font-mono">
+                          {qr.sku ? qr.sku.replace(/^SKU-/, '') : "Standard"}
                         </p>
                       </TableCell>
                       <TableCell>
@@ -665,6 +807,21 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
                         <Badge className="bg-green-100 text-green-700 border-0 font-bold">
                           +{qr.reward_points || 0}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {pCount === 0 ? (
+                          <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold">
+                            Unprinted
+                          </Badge>
+                        ) : pCount === 1 ? (
+                          <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                            [O] Original (1x)
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold">
+                            [D] Reprint ({pCount}x)
+                          </Badge>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Badge className={`text-[10px] font-bold tracking-wider uppercase border-0 ${sc.color}`}>
@@ -689,7 +846,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
                 })}
                 {qrCodes.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-16 text-gray-500">
+                    <TableCell colSpan={8} className="text-center py-16 text-gray-500">
                       <QrCode className="mx-auto h-12 w-12 text-gray-300 mb-3" />
                       <p className="font-medium text-lg">No QR codes found</p>
                       <p className="text-sm text-gray-400 mt-1">
@@ -738,10 +895,77 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
             </div>
 
             {/* Body */}
-            <div className="p-6 space-y-5 text-left">
-              <p className="text-xs text-gray-500 leading-normal">
-                Choose the layout format below to generate print-ready QR codes. Only <strong>available</strong> (unscanned) QR codes will be exported.
-              </p>
+            <div className="p-6 space-y-4 text-left max-h-[80vh] overflow-y-auto">
+              {/* Print Scope selection */}
+              <div className="space-y-2">
+                <Label className="font-semibold text-gray-700 text-sm">Print Selection</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "unprinted", label: "Unprinted (New)", desc: "Print only new unprinted QRs" },
+                    { id: "filtered", label: "Current Table", desc: "Print all currently filtered" },
+                    { id: "product", label: "By Product", desc: "Print for a specific product" },
+                    { id: "batch", label: "By Batch ID", desc: "Print for a specific batch" },
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setExportScope(s.id)}
+                      className={`p-2 rounded-lg border text-left transition-all ${
+                        exportScope === s.id
+                          ? "border-primary bg-primary/5 text-primary ring-2 ring-primary/20"
+                          : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{s.label}</div>
+                      <div className="text-[10px] text-gray-400 mt-0.5">{s.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Scope-dependent dropdowns */}
+              {exportScope === "product" && (
+                <div className="space-y-1">
+                  <Label className="font-semibold text-gray-700 text-xs">Select Product to Print</Label>
+                  <select
+                    className="w-full h-8 px-2.5 border border-gray-200 rounded-md text-xs bg-gray-50 focus:bg-white"
+                    value={exportProductId}
+                    onChange={(e) => setExportProductId(e.target.value)}
+                  >
+                    <option value="">Choose a product</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {exportScope === "batch" && (
+                <div className="space-y-1">
+                  <Label className="font-semibold text-gray-700 text-xs">Select Batch ID</Label>
+                  <select
+                    className="w-full h-8 px-2.5 border border-gray-200 rounded-md text-xs bg-gray-50 focus:bg-white"
+                    value={exportBatchId}
+                    onChange={(e) => setExportBatchId(e.target.value)}
+                  >
+                    <option value="">Choose a batch</option>
+                    {Array.from(new Set(qrCodes.map((q) => q.batch_label).filter(Boolean))).map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Physical Marking Legend */}
+              <div className="bg-amber-50/70 border border-amber-200/80 rounded-lg p-2.5 text-xs space-y-1 text-amber-900">
+                <p className="font-semibold flex items-center gap-1.5 text-amber-800 text-[11px]">
+                  <span>🏷️</span> Automatic Physical Copy Stamping:
+                </p>
+                <div className="text-[10.5px] space-y-0.5 text-amber-800/90 pl-5">
+                  <p>• <strong>[O]</strong> : First-time Original Print</p>
+                  <p>• <strong>[D]</strong> : Duplicate / Reprint copy (if previously printed)</p>
+                </div>
+              </div>
 
               {/* Format selection tabs */}
               <div className="space-y-2">
