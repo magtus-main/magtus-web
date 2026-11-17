@@ -49,6 +49,26 @@ const STICKER_PRESETS = [
   { label: "XL (65×65 mm)", width: 65, height: 65 },
 ];
 
+export function extractFinishAndSize(sku, priceMatrix) {
+  if (!sku) return "";
+  // 1. Try finding in priceMatrix
+  if (Array.isArray(priceMatrix)) {
+    const match = priceMatrix.find(
+      (m) => m.sku === sku || m.sku === `SKU-${sku}` || sku === `SKU-${m.sku}`
+    );
+    if (match && match.finish && match.size) {
+      return `${match.finish.trim()}-${match.size.replace(/\s+/g, "")}`;
+    }
+  }
+  // 2. Fallback: parse from SKU string (take last 2 tokens: Finish & Size)
+  const clean = sku.replace(/^SKU-/, "");
+  const parts = clean.split("-");
+  if (parts.length >= 2) {
+    return parts.slice(-2).join("-");
+  }
+  return clean;
+}
+
 export default function QRCodesClient({ initialProducts, initialQRCodes, initialCount, profile, orgMember }) {
   const [products, setProducts] = useState(initialProducts || []);
   const [qrCodes, setQRCodes] = useState(initialQRCodes || []);
@@ -314,10 +334,10 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
         const stamp = isReprint ? "[D]" : "[O]";
         const prodName = (qr.product?.name || "MAGTUS").toUpperCase();
         const truncatedProd = prodName.length > 20 ? prodName.slice(0, 18) + "..." : prodName;
-        const rawSku = qr.sku ? qr.sku.replace(/^SKU-/, "") : "";
-        const truncatedVariant = rawSku.length > 20 ? rawSku.slice(0, 18) + "..." : rawSku;
-        const ptsText = qr.reward_points ? `${qr.reward_points} PTS` : "";
-        return { isReprint, stamp, prodName, truncatedProd, truncatedVariant, ptsText };
+        // Extract ONLY Finish and Size (e.g. SSF-4X1/2X25MM)
+        const finishAndSize = extractFinishAndSize(qr.sku, qr.product?.specifications?.priceMatrix);
+        const truncatedVariant = finishAndSize.length > 24 ? finishAndSize.slice(0, 22) + "..." : finishAndSize;
+        return { isReprint, stamp, prodName, truncatedProd, finishAndSize: truncatedVariant };
       };
 
       // 1. ROLL FORMAT: 4-Across Roll PDF (100x25mm rows)
@@ -339,7 +359,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
             const qrIdx = i + col;
             if (qrIdx < allQRCodes.length) {
               const qr = allQRCodes[qrIdx];
-              const { stamp, truncatedProd, truncatedVariant, ptsText } = getQRLabelInfo(qr);
+              const { stamp, truncatedProd, finishAndSize } = getQRLabelInfo(qr);
 
               // Generate QR code as data URL
               const qrDataUrl = await QRCode.toDataURL(qr.code, {
@@ -354,11 +374,12 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
                 doc.setFontSize(3.8);
                 doc.text(truncatedProd, col * 25 + 12.5, 2.4, { align: "center" });
 
-                // Line 2: Variant & Points (y = 4.0mm)
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(3.2);
-                const subLine = [truncatedVariant, ptsText].filter(Boolean).join(" · ");
-                doc.text(subLine || "HARDWARE", col * 25 + 12.5, 4.0, { align: "center" });
+                // Line 2: ONLY Finish & Size (y = 4.0mm) - saves space and avoids cutoff!
+                if (finishAndSize) {
+                  doc.setFont("helvetica", "bold");
+                  doc.setFontSize(3.5);
+                  doc.text(finishAndSize, col * 25 + 12.5, 4.0, { align: "center" });
+                }
 
                 // QR Code (centered horizontally, y = 4.8 to 19.8mm)
                 const qrSize = 15;
@@ -428,7 +449,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
           const yOffset = startY + rowIdx * (cellH + gap);
 
           const qr = allQRCodes[i];
-          const { stamp, truncatedProd, truncatedVariant, ptsText } = getQRLabelInfo(qr);
+          const { stamp, truncatedProd, finishAndSize } = getQRLabelInfo(qr);
 
           const qrDataUrl = await QRCode.toDataURL(qr.code, {
             width: 400,
@@ -454,11 +475,10 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
             doc.setFontSize(idFontSize);
             doc.text(`${qr.code}  ${stamp}`, xOffset + stickerW / 2, yOffset + stickerH + 3, { align: "center" });
 
-            if (truncatedVariant || ptsText) {
-              doc.setFont("helvetica", "normal");
-              doc.setFontSize(stickerW >= 38 ? 5 : 3.8);
-              const subLine = [truncatedVariant, ptsText].filter(Boolean).join(" · ");
-              doc.text(subLine, xOffset + stickerW / 2, yOffset + stickerH + 6, { align: "center" });
+            if (finishAndSize) {
+              doc.setFont("helvetica", "bold");
+              doc.setFontSize(stickerW >= 38 ? 5.5 : 4.0);
+              doc.text(finishAndSize, xOffset + stickerW / 2, yOffset + stickerH + 6, { align: "center" });
             }
           } else {
             const qrImgSize = Math.min(stickerW, stickerH) - 2;
@@ -489,7 +509,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
 
         for (let i = 0; i < allQRCodes.length; i++) {
           const qr = allQRCodes[i];
-          const { stamp, truncatedProd, truncatedVariant, ptsText } = getQRLabelInfo(qr);
+          const { stamp, truncatedProd, finishAndSize } = getQRLabelInfo(qr);
           setExportProgress(`ZIP ${i + 1}/${allQRCodes.length}...`);
 
           const qrDataUrl = await QRCode.toDataURL(qr.code, {
@@ -521,11 +541,10 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
           doc.setFontSize(idFontSize);
           doc.text(`${qr.code}  ${stamp}`, stickerW / 2, stickerH + 3, { align: "center" });
 
-          if (truncatedVariant || ptsText) {
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(stickerW >= 38 ? 5 : 3.8);
-            const subLine = [truncatedVariant, ptsText].filter(Boolean).join(" · ");
-            doc.text(subLine, stickerW / 2, stickerH + 6, { align: "center" });
+          if (finishAndSize) {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(stickerW >= 38 ? 5.5 : 4.0);
+            doc.text(finishAndSize, stickerW / 2, stickerH + 6, { align: "center" });
           }
 
           const pdfOutput = doc.output("arraybuffer");
@@ -797,7 +816,7 @@ export default function QRCodesClient({ initialProducts, initialQRCodes, initial
                           {qr.product?.name || "Unknown Product"}
                         </p>
                         <p className="text-xs text-gray-500 font-mono">
-                          {qr.sku ? qr.sku.replace(/^SKU-/, '') : "Standard"}
+                          {extractFinishAndSize(qr.sku, qr.product?.specifications?.priceMatrix) || (qr.sku ? qr.sku.replace(/^SKU-/, '') : "Standard")}
                         </p>
                       </TableCell>
                       <TableCell>
