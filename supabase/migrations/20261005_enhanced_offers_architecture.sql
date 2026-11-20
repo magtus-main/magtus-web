@@ -44,7 +44,6 @@ DECLARE
   v_qr RECORD;
   v_carpenter RECORD;
   v_product RECORD;
-  v_variant RECORD;
   v_base_points INTEGER;
   v_final_points INTEGER;
   v_new_balance INTEGER;
@@ -119,12 +118,31 @@ BEGIN
   -- 5. Get product info
   SELECT * INTO v_product FROM products WHERE id = v_qr.product_id;
 
-  -- 6. Calculate base points (variant override > product default > qr stored)
-  IF v_qr.variant_id IS NOT NULL THEN
-    SELECT * INTO v_variant FROM product_variants WHERE id = v_qr.variant_id;
-    v_base_points := COALESCE(v_variant.reward_points_per_scan, v_product.reward_points, v_qr.reward_points);
-  ELSE
-    v_base_points := COALESCE(v_product.reward_points, v_qr.reward_points);
+  -- 6. Calculate base points (QR stored points > Variant priceMatrix points > Product default points)
+  v_base_points := NULL;
+
+  -- Priority 1: Direct reward_points stored on this QR code (e.g. 6 PTS)
+  IF v_qr.reward_points IS NOT NULL AND v_qr.reward_points > 0 THEN
+    v_base_points := v_qr.reward_points;
+  END IF;
+
+  -- Priority 2: Variant points from product specifications priceMatrix (by SKU)
+  IF (v_base_points IS NULL OR v_base_points = 0) AND v_qr.sku IS NOT NULL AND v_product.specifications IS NOT NULL THEN
+    BEGIN
+      SELECT (elem->>'reward_points')::INTEGER INTO v_base_points
+      FROM jsonb_array_elements(COALESCE(v_product.specifications->'priceMatrix', '[]'::jsonb)) AS elem
+      WHERE elem->>'sku' = v_qr.sku
+        AND elem->>'reward_points' IS NOT NULL
+        AND (elem->>'reward_points')::NUMERIC > 0
+      LIMIT 1;
+    EXCEPTION WHEN OTHERS THEN
+      v_base_points := NULL;
+    END;
+  END IF;
+
+  -- Priority 3: Product-level default reward points
+  IF v_base_points IS NULL OR v_base_points = 0 THEN
+    v_base_points := COALESCE(v_product.reward_points, 0);
   END IF;
 
   v_base_points := COALESCE(v_base_points, 0);

@@ -460,8 +460,8 @@ export default function RedemptionsClient({ initialRequests, initialCount, profi
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">Aadhaar Name</span>
-                          <p className="text-sm font-semibold text-gray-900">{decryptedKyc.decrypted_aadhaar_name || "—"}</p>
+                          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">PAN / KYC Name</span>
+                          <p className="text-sm font-semibold text-gray-900">{decryptedKyc.decrypted_pan_name || decryptedKyc.decrypted_aadhaar_name || "—"}</p>
                         </div>
                         <div>
                           <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">Bank Holder Name</span>
